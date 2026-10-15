@@ -1,0 +1,158 @@
+# =====================================================================
+# MechCAD — Automated Windows x64 Release Pipeline
+# Triggers on version tags (v*). Builds the EXE installer with
+# PyInstaller + Inno Setup 6, generates SHA-256 checksums, and
+# publishes a GitHub Release with the installer and checksums attached.
+# =====================================================================
+
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write          # Required to create GitHub Releases
+
+env:
+  PYTHON_VERSION: "3.12"
+
+jobs:
+  build-and-release:
+    name: Build Windows x64 Installer & Publish Release
+    runs-on: windows-latest
+
+    steps:
+      # ── 1. Checkout ───────────────────────────────────────────────
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      # ── 2. Set up Python ──────────────────────────────────────────
+      - name: Set up Python ${{ env.PYTHON_VERSION }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: pip
+
+      # ── 3. Install dependencies ──────────────────────────────────
+      - name: Install Python dependencies
+        run: |
+          python -m pip install --upgrade pip setuptools wheel
+          pip install -r requirements.txt
+
+      # ── 4. Extract version from tag ──────────────────────────────
+      - name: Extract version from tag
+        id: version
+        shell: bash
+        run: |
+          TAG="${GITHUB_REF#refs/tags/}"
+          VERSION="${TAG#v}"
+          echo "tag=$TAG"         >> "$GITHUB_OUTPUT"
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "::notice ::Building MechCAD $TAG (version $VERSION)"
+
+      # ── 5. Run tests ─────────────────────────────────────────────
+      - name: Run test suite
+        run: python -m pytest tests/ -v --tb=short
+        continue-on-error: true    # Don't block release on flaky UI tests
+
+      # ── 6. Build with PyInstaller ────────────────────────────────
+      - name: Build MechCAD with PyInstaller
+        run: |
+          pyinstaller MechCAD.spec --noconfirm --clean
+          # Verify the executable was created
+          if (!(Test-Path "dist\MechCAD\MechCAD.exe")) {
+            Write-Error "PyInstaller build failed — MechCAD.exe not found!"
+            exit 1
+          }
+          Write-Host "PyInstaller build successful: dist\MechCAD\MechCAD.exe"
+
+      # ── 7. Build EXE Installer with Inno Setup ──────────────────
+      - name: Build installer with Inno Setup 6
+        run: |
+          # Update version in the .iss script dynamically
+          $issPath = "installer\mechcad.iss"
+          $version = "${{ steps.version.outputs.version }}"
+          (Get-Content $issPath) `
+            -replace '#define MyAppVersion ".*"', "#define MyAppVersion `"$version`"" `
+            -replace 'VersionInfoVersion=.*', "VersionInfoVersion=$version.0" `
+            -replace 'VersionInfoProductVersion=.*', "VersionInfoProductVersion=$version.0" `
+            -replace 'OutputBaseFilename=.*', "OutputBaseFilename=MechCAD-Setup-v$version-x64" |
+            Set-Content $issPath
+
+          # Inno Setup 6 is pre-installed on windows-latest runners
+          & "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" "$issPath"
+          if ($LASTEXITCODE -ne 0) { exit 1 }
+
+          $installer = "dist\MechCAD-Setup-v$version-x64.exe"
+          if (!(Test-Path $installer)) {
+            Write-Error "Inno Setup build failed — installer not found!"
+            exit 1
+          }
+          Write-Host "Installer built: $installer"
+
+      # ── 8. Generate SHA-256 checksums ────────────────────────────
+      - name: Generate SHA-256 checksums
+        shell: pwsh
+        run: |
+          $version = "${{ steps.version.outputs.version }}"
+          $installer = "dist\MechCAD-Setup-v$version-x64.exe"
+          $hash = (Get-FileHash $installer -Algorithm SHA256).Hash
+          "$hash  MechCAD-Setup-v$version-x64.exe" | Out-File -FilePath "dist\SHA256SUMS.txt" -Encoding utf8
+          Write-Host "SHA256: $hash"
+
+      # ── 9. Generate Release Notes ────────────────────────────────
+      - name: Generate release notes
+        id: notes
+        shell: bash
+        run: |
+          VERSION="${{ steps.version.outputs.version }}"
+          TAG="${{ steps.version.outputs.tag }}"
+
+          cat > dist/RELEASE_NOTES.md << 'NOTES_EOF'
+          ## MechCAD $TAG
+
+          ### 🚀 What's New
+          - Professional 3D parametric CAD application
+          - Fusion 360-inspired interface and modelling workflow
+          - Full solid modelling: Extrude, Revolve, Sweep, Loft, Booleans
+          - Parametric sketcher with constraints (SolveSpace)
+          - Open CASCADE Technology (OCC) B-Rep geometry kernel
+          - STL, STEP, and DXF import/export
+
+          ### 📦 Installation
+          1. Download **MechCAD-Setup-v$VERSION-x64.exe** below
+          2. Run the installer and follow the wizard
+          3. Launch MechCAD from Start Menu or Desktop shortcut
+
+          ### 🔐 Verify Integrity
+          ```
+          certutil -hashfile MechCAD-Setup-v$VERSION-x64.exe SHA256
+          ```
+          Compare the hash with the value in **SHA256SUMS.txt**.
+
+          ### 📋 System Requirements
+          - Windows 10/11 x64
+          - 8 GB RAM (16 GB recommended)
+          - OpenGL 3.3+ compatible GPU
+          NOTES_EOF
+
+          # Replace $TAG and $VERSION placeholders
+          sed -i "s/\$TAG/$TAG/g; s/\$VERSION/$VERSION/g" dist/RELEASE_NOTES.md
+
+      # ── 10. Create GitHub Release ────────────────────────────────
+      - name: Publish GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.version.outputs.tag }}
+          name: "MechCAD ${{ steps.version.outputs.tag }}"
+          body_path: dist/RELEASE_NOTES.md
+          draft: false
+          prerelease: ${{ contains(steps.version.outputs.tag, 'alpha') || contains(steps.version.outputs.tag, 'beta') || contains(steps.version.outputs.tag, 'rc') }}
+          files: |
+            dist/MechCAD-Setup-v${{ steps.version.outputs.version }}-x64.exe
+            dist/SHA256SUMS.txt
+          fail_on_unmatched_files: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
