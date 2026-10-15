@@ -1,0 +1,3 @@
+"""
+MechCAD Automated Test Suite
+"""
