@@ -14,6 +14,12 @@ __pycache__/
 *.log
 .pytest_cache/
 tests/.pytest_cache/
+build/
+dist/
+*.spec
+installer/Output/
+*.exe.tmp
+*.msi.tmp
 
 # User Project Files & Temp exports
 scratch/

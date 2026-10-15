@@ -1,22 +1,24 @@
 """
 MechCAD Command Ribbon
-Dense horizontal toolbar modeled on Autodesk Fusion 360's command ribbon.
-Supports SOLID mode and contextual SKETCH mode.
+Exact replica of Autodesk Fusion 360's command ribbon toolbar.
+Features authentic tool groupings (CREATE, MODIFY, ASSEMBLE, CONSTRUCT, INSPECT, INSERT, SELECT),
+vector CAD icons, and contextual SKETCH mode with prominent [✔ FINISH SKETCH] button.
 """
 
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QToolButton, QTabBar, QMenu, QFrame, QSizePolicy
 )
-from PySide6.QtCore import Qt, Signal
-from PySide6.QtGui import QAction, QIcon
+from PySide6.QtCore import Qt, Signal, QSize
+from PySide6.QtGui import QAction, QIcon, QFont
 
 from mechcad.ui.theme import ThemeColors
+from mechcad.ui.icons import CADIcons
 
 
 class CommandRibbon(QWidget):
-    """Dense horizontal command ribbon with tool groups and contextual tabs."""
+    """Dense horizontal command ribbon with Fusion 360 tool groups and contextual tabs."""
 
-    command_triggered = Signal(str)  # Tool name or identifier
+    command_triggered = Signal(str)  # Tool identifier
     finish_sketch_requested = Signal()
 
     def __init__(self, parent=None):
@@ -32,15 +34,36 @@ class CommandRibbon(QWidget):
 
         # --- Top Row: Workspace Selector & Ribbon Mode Tabs ---
         top_bar = QWidget()
-        top_bar.setStyleSheet(f"background-color: {ThemeColors.BG_RIBBON}; border-bottom: 1px solid {ThemeColors.BORDER_SUBTLE};")
+        top_bar.setStyleSheet(f"""
+            QWidget {{
+                background-color: #23272d;
+                border-bottom: 1px solid #333842;
+                min-height: 28px;
+                max-height: 28px;
+            }}
+        """)
         top_layout = QHBoxLayout(top_bar)
         top_layout.setContentsMargins(8, 0, 8, 0)
-        top_layout.setSpacing(12)
+        top_layout.setSpacing(10)
 
         # Workspace Dropdown: DESIGN
         self.ws_btn = QToolButton()
         self.ws_btn.setText("DESIGN ▾")
-        self.ws_btn.setStyleSheet(f"font-weight: 700; color: #ffffff; padding: 6px 10px; font-size: 11px;")
+        self.ws_btn.setStyleSheet("""
+            QToolButton {
+                font-weight: 700;
+                font-size: 11px;
+                color: #ffffff;
+                background-color: #1a1d21;
+                border: 1px solid #3a414c;
+                border-radius: 2px;
+                padding: 3px 8px;
+            }
+            QToolButton:hover {
+                background-color: #282f38;
+                border-color: #0078d4;
+            }
+        """)
         self.ws_menu = QMenu(self)
         self.ws_menu.addAction("Design (Active)")
         self.ws_menu.addAction("Generative Design (Planned)")
@@ -51,7 +74,7 @@ class CommandRibbon(QWidget):
         self.ws_btn.setPopupMode(QToolButton.InstantPopup)
         top_layout.addWidget(self.ws_btn)
 
-        # Mode Tab Bar
+        # Mode Tab Bar (SOLID, SURFACE, MESH, SHEET METAL, PLASTIC, UTILITIES)
         self.tab_bar = QTabBar()
         self.tab_bar.setObjectName("RibbonTabBar")
         self.tab_bar.addTab("SOLID")
@@ -59,6 +82,23 @@ class CommandRibbon(QWidget):
         self.tab_bar.addTab("MESH")
         self.tab_bar.addTab("SHEET METAL")
         self.tab_bar.addTab("UTILITIES")
+        self.tab_bar.setStyleSheet("""
+            QTabBar::tab {
+                background-color: transparent;
+                color: #8b939e;
+                font-weight: 600;
+                font-size: 11px;
+                padding: 6px 14px;
+                border: none;
+            }
+            QTabBar::tab:selected {
+                color: #ffffff;
+                border-bottom: 2px solid #0078d4;
+            }
+            QTabBar::tab:hover:!selected {
+                color: #e0e6ed;
+            }
+        """)
         self.tab_bar.currentChanged.connect(self._on_tab_changed)
         top_layout.addWidget(self.tab_bar)
 
@@ -67,8 +107,26 @@ class CommandRibbon(QWidget):
         # Contextual Finish Sketch Button (Visible only during sketch mode)
         self.btn_finish_sketch = QToolButton()
         self.btn_finish_sketch.setObjectName("FinishSketchBtn")
-        self.btn_finish_sketch.setText("✔ FINISH SKETCH")
-        self.btn_finish_sketch.setToolTip("Exit Sketch Mode and Return to 3D Solid Modeling")
+        self.btn_finish_sketch.setIcon(CADIcons.get("finish_sketch", 16))
+        self.btn_finish_sketch.setIconSize(QSize(16, 16))
+        self.btn_finish_sketch.setText(" FINISH SKETCH")
+        self.btn_finish_sketch.setToolButtonStyle(Qt.ToolButtonTextBesideIcon)
+        self.btn_finish_sketch.setToolTip("Exit Sketch Mode and Return to 3D Solid Modeling (Enter / Esc)")
+        self.btn_finish_sketch.setStyleSheet("""
+            QToolButton {
+                background-color: #107c41;
+                color: #ffffff;
+                font-weight: 700;
+                font-size: 11px;
+                padding: 3px 12px;
+                border-radius: 3px;
+                border: 1px solid #1f9455;
+            }
+            QToolButton:hover {
+                background-color: #138a49;
+                border-color: #40df85;
+            }
+        """)
         self.btn_finish_sketch.clicked.connect(self.finish_sketch_requested.emit)
         self.btn_finish_sketch.setVisible(False)
         top_layout.addWidget(self.btn_finish_sketch)
@@ -77,10 +135,17 @@ class CommandRibbon(QWidget):
 
         # --- Bottom Row: Dense Command Panels ---
         self.panel_container = QWidget()
-        self.panel_container.setStyleSheet(f"background-color: {ThemeColors.BG_RIBBON}; min-height: 64px; max-height: 68px;")
+        self.panel_container.setStyleSheet("""
+            QWidget {
+                background-color: #282c34;
+                border-bottom: 1px solid #1e2227;
+                min-height: 84px;
+                max-height: 84px;
+            }
+        """)
         self.panel_layout = QHBoxLayout(self.panel_container)
-        self.panel_layout.setContentsMargins(6, 4, 6, 4)
-        self.panel_layout.setSpacing(6)
+        self.panel_layout.setContentsMargins(6, 2, 6, 2)
+        self.panel_layout.setSpacing(4)
 
         root_layout.addWidget(self.panel_container)
 
@@ -89,17 +154,48 @@ class CommandRibbon(QWidget):
     def _create_panel_divider(self) -> QFrame:
         line = QFrame()
         line.setFrameShape(QFrame.VLine)
-        line.setFrameShadow(QFrame.Sunken)
-        line.setStyleSheet(f"color: {ThemeColors.BORDER_SUBTLE};")
+        line.setFrameShadow(QFrame.Plain)
+        line.setStyleSheet("color: #383e4a; margin: 4px 2px;")
         return line
 
-    def _create_group_box(self, title: str, tools: list) -> QWidget:
+    def _create_tool_button(self, icon_name: str, label: str, tooltip: str, cmd_id: str) -> QToolButton:
+        btn = QToolButton()
+        btn.setIcon(CADIcons.get(icon_name, 24))
+        btn.setIconSize(QSize(24, 24))
+        btn.setText(label)
+        btn.setToolButtonStyle(Qt.ToolButtonTextUnderIcon)
+        btn.setToolTip(tooltip)
+        btn.setFixedSize(52, 48)
+        btn.setStyleSheet("""
+            QToolButton {
+                background-color: transparent;
+                color: #e0e6ed;
+                font-size: 9.5px;
+                font-weight: 500;
+                border: 1px solid transparent;
+                border-radius: 3px;
+                padding: 1px;
+            }
+            QToolButton:hover {
+                background-color: #343a45;
+                border: 1px solid #4a5363;
+                color: #ffffff;
+            }
+            QToolButton:pressed {
+                background-color: #0e639c;
+                border: 1px solid #0078d4;
+            }
+        """)
+        btn.clicked.connect(lambda: self.command_triggered.emit(cmd_id))
+        return btn
+
+    def _create_group_box(self, title: str, tools: list, menu_actions: list = None) -> QWidget:
         box = QWidget()
         v_layout = QVBoxLayout(box)
-        v_layout.setContentsMargins(2, 0, 2, 0)
+        v_layout.setContentsMargins(2, 2, 2, 2)
         v_layout.setSpacing(2)
 
-        # Top tools row
+        # Tools row
         h_tools = QHBoxLayout()
         h_tools.setContentsMargins(0, 0, 0, 0)
         h_tools.setSpacing(2)
@@ -107,200 +203,165 @@ class CommandRibbon(QWidget):
             h_tools.addWidget(t)
         v_layout.addLayout(h_tools)
 
-        # Bottom group label
-        lbl = QLabel(title.upper())
-        lbl.setAlignment(Qt.AlignCenter)
-        lbl.setStyleSheet(f"color: {ThemeColors.TEXT_MUTED}; font-size: 9px; font-weight: 600; padding-top: 1px;")
-        v_layout.addWidget(lbl)
+        # Bottom label with optional dropdown arrow
+        lbl_btn = QToolButton()
+        arrow_str = " ▾" if menu_actions else ""
+        lbl_btn.setText(f"{title.upper()}{arrow_str}")
+        lbl_btn.setFixedHeight(14)
+        lbl_btn.setStyleSheet("""
+            QToolButton {
+                color: #8b939e;
+                font-size: 8.5px;
+                font-weight: 700;
+                letter-spacing: 0.5px;
+                background: transparent;
+                border: none;
+                padding: 0 2px;
+            }
+            QToolButton:hover {
+                color: #ffffff;
+            }
+        """)
+        if menu_actions:
+            lbl_btn.setPopupMode(QToolButton.InstantPopup)
+            m = QMenu(self)
+            for act_name, cmd_id in menu_actions:
+                if act_name == "---":
+                    m.addSeparator()
+                else:
+                    m.addAction(act_name).triggered.connect(lambda _, c=cmd_id: self.command_triggered.emit(c))
+            lbl_btn.setMenu(m)
+        v_layout.addWidget(lbl_btn, alignment=Qt.AlignCenter)
 
         return box
 
     def _build_solid_panels(self):
-        # Clear existing
         while self.panel_layout.count():
             item = self.panel_layout.takeAt(0)
             if item.widget():
                 item.widget().deleteLater()
 
-        # 1. CREATE Group
-        btn_sketch = QToolButton()
-        btn_sketch.setText("✏\nCreate Sketch")
-        btn_sketch.setToolTip("Create a new 2D sketch on a plane or face (L, R, C)")
-        btn_sketch.clicked.connect(lambda: self.command_triggered.emit("create_sketch"))
+        # 1. CREATE Group (Fusion 360 Parity)
+        btn_sketch = self._create_tool_button("create_sketch", "Sketch", "Create a new 2D sketch on plane or face (L, R, C)", "create_sketch")
+        btn_extrude = self._create_tool_button("extrude", "Extrude", "Extrude sketch profile into 3D solid (E)", "extrude")
+        btn_revolve = self._create_tool_button("revolve", "Revolve", "Revolve sketch profile around an axis", "revolve")
+        btn_hole = self._create_tool_button("hole", "Hole", "Create a drilled, counterbore, or countersink hole (H)", "hole")
 
-        btn_extrude = QToolButton()
-        btn_extrude.setText("⬆\nExtrude")
-        btn_extrude.setToolTip("Extrude sketch profile into a 3D solid (E)")
-        btn_extrude.clicked.connect(lambda: self.command_triggered.emit("extrude"))
-
-        btn_revolve = QToolButton()
-        btn_revolve.setText("🔄\nRevolve")
-        btn_revolve.setToolTip("Revolve sketch profile around an axis")
-        btn_revolve.clicked.connect(lambda: self.command_triggered.emit("revolve"))
-
-        btn_hole = QToolButton()
-        btn_hole.setText("🕳\nHole")
-        btn_hole.setToolTip("Create a counterbore, countersink, or drilled hole (H)")
-        btn_hole.clicked.connect(lambda: self.command_triggered.emit("hole"))
-
-        # Primitives dropdown
-        btn_prim = QToolButton()
-        btn_prim.setText("📦\nPrimitives ▾")
-        btn_prim.setPopupMode(QToolButton.InstantPopup)
-        prim_menu = QMenu(self)
-        prim_menu.addAction("Box...").triggered.connect(lambda: self.command_triggered.emit("prim_box"))
-        prim_menu.addAction("Cylinder...").triggered.connect(lambda: self.command_triggered.emit("prim_cylinder"))
-        prim_menu.addAction("Sphere...").triggered.connect(lambda: self.command_triggered.emit("prim_sphere"))
-        prim_menu.addAction("Cone...").triggered.connect(lambda: self.command_triggered.emit("prim_cone"))
-        prim_menu.addAction("Torus...").triggered.connect(lambda: self.command_triggered.emit("prim_torus"))
-        prim_menu.addSeparator()
-        prim_menu.addAction("Linear Pattern...").triggered.connect(lambda: self.command_triggered.emit("pattern_linear"))
-        prim_menu.addAction("Circular Pattern...").triggered.connect(lambda: self.command_triggered.emit("pattern_circular"))
-        btn_prim.setMenu(prim_menu)
-
-        create_grp = self._create_group_box("Create", [btn_sketch, btn_extrude, btn_revolve, btn_hole, btn_prim])
+        create_menu = [
+            ("Box...", "prim_box"),
+            ("Cylinder...", "prim_cylinder"),
+            ("Sphere...", "prim_sphere"),
+            ("Torus...", "prim_torus"),
+            ("---", ""),
+            ("Sweep Profile...", "sweep"),
+            ("Loft Profiles...", "loft"),
+            ("---", ""),
+            ("Rectangular Pattern...", "pattern_linear"),
+            ("Circular Pattern...", "pattern_circular"),
+            ("Mirror...", "mirror"),
+        ]
+        create_grp = self._create_group_box("Create", [btn_sketch, btn_extrude, btn_revolve, btn_hole], create_menu)
         self.panel_layout.addWidget(create_grp)
         self.panel_layout.addWidget(self._create_panel_divider())
 
         # 2. MODIFY Group
-        btn_fillet = QToolButton()
-        btn_fillet.setText("⌒\nFillet")
-        btn_fillet.setToolTip("Round interior or exterior solid edges (F)")
-        btn_fillet.clicked.connect(lambda: self.command_triggered.emit("fillet"))
+        btn_press_pull = self._create_tool_button("extrude", "Press Pull", "Press Pull / Offset Faces (Q)", "extrude")
+        btn_fillet = self._create_tool_button("fillet", "Fillet", "Round interior or exterior solid edges (F)", "fillet")
+        btn_chamfer = self._create_tool_button("chamfer", "Chamfer", "Apply beveled mechanical edge (Chamfer)", "chamfer")
+        btn_shell = self._create_tool_button("shell", "Shell", "Hollow out solid body with uniform wall thickness", "shell")
+        btn_combine = self._create_tool_button("combine", "Combine", "Boolean Join, Cut, or Intersect solids", "combine")
 
-        btn_chamfer = QToolButton()
-        btn_chamfer.setText("⊿\nChamfer")
-        btn_chamfer.setToolTip("Apply a beveled edge to solid edges")
-        btn_chamfer.clicked.connect(lambda: self.command_triggered.emit("chamfer"))
-
-        btn_combine = QToolButton()
-        btn_combine.setText("⚯\nCombine ▾")
-        btn_combine.setPopupMode(QToolButton.InstantPopup)
-        combine_menu = QMenu(self)
-        combine_menu.addAction("Join (Boolean Union)").triggered.connect(lambda: self.command_triggered.emit("bool_fuse"))
-        combine_menu.addAction("Cut (Boolean Subtract)").triggered.connect(lambda: self.command_triggered.emit("bool_cut"))
-        combine_menu.addAction("Intersect (Common)").triggered.connect(lambda: self.command_triggered.emit("bool_intersect"))
-        btn_combine.setMenu(combine_menu)
-
-        modify_grp = self._create_group_box("Modify", [btn_fillet, btn_chamfer, btn_combine])
+        modify_menu = [
+            ("Split Body...", "split_body"),
+            ("Move / Copy...", "move"),
+            ("Appearance / Material...", "appearance"),
+        ]
+        modify_grp = self._create_group_box("Modify", [btn_press_pull, btn_fillet, btn_chamfer, btn_shell, btn_combine], modify_menu)
         self.panel_layout.addWidget(modify_grp)
         self.panel_layout.addWidget(self._create_panel_divider())
 
-        # 3. CONSTRUCT Group
-        btn_plane = QToolButton()
-        btn_plane.setText("📐\nOffset Plane")
-        btn_plane.setToolTip("Create a datum plane offset from a planar face or reference plane")
-        btn_plane.clicked.connect(lambda: self.command_triggered.emit("construct_plane"))
+        # 3. ASSEMBLE Group
+        btn_comp = self._create_tool_button("extrude", "New Comp", "Create New Component", "new_component")
+        btn_joint = self._create_tool_button("revolve", "Joint", "Create Mechanical Joint (J)", "joint")
+        assemble_grp = self._create_group_box("Assemble", [btn_comp, btn_joint])
+        self.panel_layout.addWidget(assemble_grp)
+        self.panel_layout.addWidget(self._create_panel_divider())
 
-        construct_grp = self._create_group_box("Construct", [btn_plane])
+        # 4. CONSTRUCT Group
+        btn_plane = self._create_tool_button("construct_plane", "Offset Pln", "Create datum plane offset from face or plane", "construct_plane")
+        construct_menu = [
+            ("Plane at Angle...", "plane_angle"),
+            ("Midplane...", "plane_mid"),
+        ]
+        construct_grp = self._create_group_box("Construct", [btn_plane], construct_menu)
         self.panel_layout.addWidget(construct_grp)
         self.panel_layout.addWidget(self._create_panel_divider())
 
-        # 4. INSPECT Group
-        btn_measure = QToolButton()
-        btn_measure.setText("📏\nMeasure")
-        btn_measure.setToolTip("Measure distances, angles, radii, and bounding boxes (I)")
-        btn_measure.clicked.connect(lambda: self.command_triggered.emit("measure"))
-
-        inspect_grp = self._create_group_box("Inspect", [btn_measure])
+        # 5. INSPECT Group
+        btn_measure = self._create_tool_button("measure", "Measure", "Measure distances, angles, radii (I)", "measure")
+        btn_params = self._create_tool_button("parameters", "Parameters", "Manage Model and User Parameters (fx)", "parameters")
+        inspect_grp = self._create_group_box("Inspect", [btn_measure, btn_params])
         self.panel_layout.addWidget(inspect_grp)
         self.panel_layout.addWidget(self._create_panel_divider())
 
-        # 5. INSERT Group
-        btn_step = QToolButton()
-        btn_step.setText("📥\nInsert STEP")
-        btn_step.setToolTip("Import external standard STEP AP203/AP214 CAD file")
-        btn_step.clicked.connect(lambda: self.command_triggered.emit("insert_step"))
-
-        insert_grp = self._create_group_box("Insert", [btn_step])
+        # 6. INSERT Group
+        btn_step = self._create_tool_button("save", "Insert STEP", "Import standard STEP AP203/AP214 Solid CAD file", "insert_step")
+        insert_menu = [
+            ("Insert STL Mesh...", "insert_stl"),
+            ("Insert DXF Drawing...", "insert_dxf"),
+        ]
+        insert_grp = self._create_group_box("Insert", [btn_step], insert_menu)
         self.panel_layout.addWidget(insert_grp)
 
         self.panel_layout.addStretch()
 
     def _build_sketch_panels(self):
-        # Clear existing
         while self.panel_layout.count():
             item = self.panel_layout.takeAt(0)
             if item.widget():
                 item.widget().deleteLater()
 
-        # 1. CREATE Group
-        btn_line = QToolButton()
-        btn_line.setText("╱\nLine (L)")
-        btn_line.setToolTip("Create sketch line segments (L)")
-        btn_line.clicked.connect(lambda: self.command_triggered.emit("sketch_line"))
+        # 1. CREATE Group (In-Canvas 2D Sketch Tools)
+        btn_line = self._create_tool_button("sketch_line", "Line", "Create sketch line segments with live HUD (L)", "sketch_line")
+        btn_rect = self._create_tool_button("sketch_rect", "2-Pt Rect", "Create 2-point rectangle with live dimensions (R)", "sketch_rect")
+        btn_crect = self._create_tool_button("sketch_center_rect", "Center Rect", "Create rectangle from center point", "sketch_center_rect")
+        btn_circle = self._create_tool_button("sketch_circle", "Circle", "Create center-diameter circle (C)", "sketch_circle")
+        btn_dim = self._create_tool_button("sketch_dimension", "Dimension", "Add precise dimension constraint (D)", "sketch_dimension")
 
-        btn_rect = QToolButton()
-        btn_rect.setText("▭\n2-Pt Rect (R)")
-        btn_rect.setToolTip("Create 2-point rectangle (R)")
-        btn_rect.clicked.connect(lambda: self.command_triggered.emit("sketch_rect"))
-
-        btn_crect = QToolButton()
-        btn_crect.setText("⊞\nCenter Rect")
-        btn_crect.setToolTip("Create center rectangle")
-        btn_crect.clicked.connect(lambda: self.command_triggered.emit("sketch_center_rect"))
-
-        btn_circle = QToolButton()
-        btn_circle.setText("⚪\nCircle (C)")
-        btn_circle.setToolTip("Create center-diameter circle (C)")
-        btn_circle.clicked.connect(lambda: self.command_triggered.emit("sketch_circle"))
-
-        btn_dim = QToolButton()
-        btn_dim.setText("↔\nDimension (D)")
-        btn_dim.setToolTip("Add length, distance, or diameter constraint (D)")
-        btn_dim.clicked.connect(lambda: self.command_triggered.emit("sketch_dimension"))
-
-        create_grp = self._create_group_box("Create", [btn_line, btn_rect, btn_crect, btn_circle, btn_dim])
+        create_menu = [
+            ("Center Diameter Circle (C)", "sketch_circle"),
+            ("3-Point Arc...", "sketch_arc"),
+            ("Spline Curve...", "sketch_spline"),
+            ("Point...", "sketch_point"),
+        ]
+        create_grp = self._create_group_box("Create", [btn_line, btn_rect, btn_crect, btn_circle, btn_dim], create_menu)
         self.panel_layout.addWidget(create_grp)
         self.panel_layout.addWidget(self._create_panel_divider())
 
         # 2. CONSTRAINTS Group
-        btn_c_coin = QToolButton()
-        btn_c_coin.setText("⌖\nCoincident")
-        btn_c_coin.setToolTip("Constrain two points together")
-        btn_c_coin.clicked.connect(lambda: self.command_triggered.emit("constrain_coincident"))
+        btn_c_hv = self._create_tool_button("sketch_line", "Horiz/Vert", "Constrain line horizontal or vertical", "constrain_horizontal")
+        btn_c_coin = self._create_tool_button("sketch_line", "Coincident", "Constrain points to coincide", "constrain_coincident")
+        btn_c_par = self._create_tool_button("sketch_rect", "Parallel", "Constrain lines parallel", "constrain_parallel")
+        btn_c_perp = self._create_tool_button("sketch_rect", "Perpend", "Constrain lines perpendicular", "constrain_perpendicular")
+        btn_c_eq = self._create_tool_button("sketch_dimension", "Equal", "Constrain entities equal length", "constrain_equal")
+        btn_c_fix = self._create_tool_button("solid_combine", "Fix/Lock", "Lock point position in place", "constrain_fix")
 
-        btn_c_h = QToolButton()
-        btn_c_h.setText("━\nHorizontal")
-        btn_c_h.setToolTip("Make line horizontal")
-        btn_c_h.clicked.connect(lambda: self.command_triggered.emit("constrain_horizontal"))
-
-        btn_c_v = QToolButton()
-        btn_c_v.setText("┃\nVertical")
-        btn_c_v.setToolTip("Make line vertical")
-        btn_c_v.clicked.connect(lambda: self.command_triggered.emit("constrain_vertical"))
-
-        btn_c_par = QToolButton()
-        btn_c_par.setText("∥\nParallel")
-        btn_c_par.setToolTip("Constrain two lines parallel")
-        btn_c_par.clicked.connect(lambda: self.command_triggered.emit("constrain_parallel"))
-
-        btn_c_perp = QToolButton()
-        btn_c_perp.setText("⟂\nPerpendicular")
-        btn_c_perp.setToolTip("Constrain two lines perpendicular")
-        btn_c_perp.clicked.connect(lambda: self.command_triggered.emit("constrain_perpendicular"))
-
-        btn_c_eq = QToolButton()
-        btn_c_eq.setText("=\nEqual")
-        btn_c_eq.setToolTip("Constrain equal length")
-        btn_c_eq.clicked.connect(lambda: self.command_triggered.emit("constrain_equal"))
-
-        btn_c_fix = QToolButton()
-        btn_c_fix.setText("⚓\nFix/Lock")
-        btn_c_fix.setToolTip("Lock point position")
-        btn_c_fix.clicked.connect(lambda: self.command_triggered.emit("constrain_fix"))
-
-        c_grp = self._create_group_box("Constraints", [btn_c_coin, btn_c_h, btn_c_v, btn_c_par, btn_c_perp, btn_c_eq, btn_c_fix])
+        c_grp = self._create_group_box("Constraints", [btn_c_hv, btn_c_coin, btn_c_par, btn_c_perp, btn_c_eq, btn_c_fix])
         self.panel_layout.addWidget(c_grp)
+        self.panel_layout.addWidget(self._create_panel_divider())
+
+        # 3. INSPECT Group
+        btn_meas = self._create_tool_button("measure", "Measure", "Measure distances (I)", "measure")
+        btn_fx = self._create_tool_button("parameters", "Parameters", "Manage Parameters (fx)", "parameters")
+        inspect_grp = self._create_group_box("Inspect", [btn_meas, btn_fx])
+        self.panel_layout.addWidget(inspect_grp)
 
         self.panel_layout.addStretch()
 
     def set_sketch_mode(self, active: bool):
-        """Switches ribbon between SOLID modeling and contextual SKETCH mode."""
         self.is_sketch_active = active
         self.btn_finish_sketch.setVisible(active)
         if active:
-            # Add or activate SKETCH tab
             if self.tab_bar.tabText(self.tab_bar.count() - 1) != "SKETCH":
                 idx = self.tab_bar.addTab("SKETCH")
                 self.tab_bar.setCurrentIndex(idx)

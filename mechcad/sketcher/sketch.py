@@ -117,7 +117,75 @@ class Sketch:
         self.last_result = SketchSolver.solve(self.points, self.lines, self.constraints)
         return self.last_result
 
-    # --- Open CASCADE Profile Conversion ---
+    # --- Open CASCADE Profile Conversion & Visualization ---
+
+    def get_profile_polygons(self) -> List[List[Tuple[float, float, float]]]:
+        """
+        Returns list of 3D polygon vertex rings representing closed sketch profiles.
+        Used to render translucent shaded profiles in the viewport (Fusion 360 style).
+        """
+        polys = []
+
+        # 1. Closed Circles
+        for circ in self.circles.values():
+            if circ.is_construction:
+                continue
+            cp = self.points.get(circ.center_id)
+            if not cp:
+                continue
+            r = circ.radius
+            pts = []
+            for i in range(36):
+                ang = 2.0 * math.pi * (i / 36.0)
+                u = cp.u + r * math.cos(ang)
+                v = cp.v + r * math.sin(ang)
+                p3d = self.map_to_3d(u, v)
+                pts.append((p3d.X(), p3d.Y(), p3d.Z()))
+            polys.append(pts)
+
+        # 2. Closed Line Loops
+        if self.lines:
+            # Build adjacency graph
+            adj: Dict[str, List[Tuple[str, str]]] = {}
+            for lid, line in self.lines.items():
+                if line.is_construction:
+                    continue
+                adj.setdefault(line.p1_id, []).append((line.p2_id, lid))
+                adj.setdefault(line.p2_id, []).append((line.p1_id, lid))
+
+            visited_lines = set()
+            for start_pt in list(adj.keys()):
+                if len(adj.get(start_pt, [])) < 2:
+                    continue
+                for nxt, lid in adj[start_pt]:
+                    if lid in visited_lines:
+                        continue
+                    cycle = [start_pt, nxt]
+                    used_edges = {lid}
+                    curr = nxt
+                    prev = start_pt
+                    while True:
+                        candidates = [e for e in adj.get(curr, []) if e[1] not in used_edges]
+                        if not candidates:
+                            break
+                        next_cand, next_lid = candidates[0]
+                        cycle.append(next_cand)
+                        used_edges.add(next_lid)
+                        prev = curr
+                        curr = next_cand
+                        if curr == start_pt:
+                            # Closed loop!
+                            visited_lines.update(used_edges)
+                            poly_pts = []
+                            for pid in cycle[:-1]:
+                                pt = self.points.get(pid)
+                                if pt:
+                                    p3d = self.map_to_3d(pt.u, pt.v)
+                                    poly_pts.append((p3d.X(), p3d.Y(), p3d.Z()))
+                            if len(poly_pts) >= 3:
+                                polys.append(poly_pts)
+                            break
+        return polys
 
     def to_occ_wire(self) -> TopoDS_Wire:
         """Constructs an Open CASCADE closed TopoDS_Wire from sketch entities."""
@@ -143,7 +211,7 @@ class Sketch:
 
         # Handle line loops
         if self.lines:
-            # Build edges in loop order
+            # Build edges
             for lid, line in self.lines.items():
                 if line.is_construction:
                     continue

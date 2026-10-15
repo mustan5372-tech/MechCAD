@@ -1,14 +1,18 @@
 """
 MechCAD Main Window
-Assembles the complete Autodesk Fusion 360-style mechanical CAD desktop application.
+Assembles the complete Autodesk Fusion 360-replica mechanical CAD desktop application.
+Focuses purely on high-precision 3D Parametric Modeling with exact Fusion 360 commands,
+parameters, controls, shortcuts, in-canvas sketching, timeline history, and viewport HUD.
 """
 
 import os
 from typing import Optional
 from PySide6.QtWidgets import (
-    QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QDockWidget, QFileDialog, QMessageBox, QSplitter
+    QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QDockWidget, QFileDialog,
+    QMessageBox, QSplitter
 )
 from PySide6.QtCore import Qt
+from PySide6.QtGui import QKeyEvent
 
 from mechcad.ui.theme import ThemeColors, FUSION_QSS
 from mechcad.ui.app_header import AppHeader
@@ -20,6 +24,8 @@ from mechcad.ui.sketch_palette import SketchPalette
 from mechcad.ui.timeline import FeatureTimeline
 from mechcad.ui.status_bar import StatusBar
 from mechcad.ui.learning_panel import LearningPanel
+from mechcad.ui.parameters_dialog import ParametersDialog
+from mechcad.ui.shortcut_search import ShortcutSearchPopup
 from mechcad.core.document import CADDocument
 from mechcad.core.project_io import ProjectIO
 from mechcad.kernel.occ_solid import SolidOperations
@@ -28,17 +34,20 @@ from mechcad.learning.automotive_exercises import AutomotiveExercise
 
 
 class MainWindow(QMainWindow):
-    """Primary application window matching Fusion 360 workspace layout."""
+    """Primary application window matching Fusion 360 workspace layout and workflow."""
 
     def __init__(self):
         super().__init__()
-        self.setWindowTitle("MechCAD — Learn. Design. Engineer.")
-        self.resize(1280, 800)
+        self.setWindowTitle("MechCAD - Professional 3D Parametric CAD")
+        self.resize(1360, 850)
         self.setStyleSheet(FUSION_QSS)
 
-        # Active Document & State
+        # Active Document & Modeling State
         self.doc = CADDocument("Untitled 1")
         self.active_sketch_id: Optional[str] = None
+        self._pending_sketch_tool: Optional[str] = None
+        self._editing_feature_id: Optional[str] = None
+        self._shortcut_popup: Optional[ShortcutSearchPopup] = None
 
         self._setup_ui()
         self._connect_signals()
@@ -54,47 +63,50 @@ class MainWindow(QMainWindow):
         main_vlayout.setContentsMargins(0, 0, 0, 0)
         main_vlayout.setSpacing(0)
 
-        # 1. Top Application Header
+        # 1. Top Application Header (Fusion 360 App Bar)
         self.header = AppHeader(self)
         main_vlayout.addWidget(self.header)
 
-        # 2. Command Ribbon
+        # 2. Command Ribbon (SOLID & Contextual SKETCH Tabs)
         self.ribbon = CommandRibbon(self)
         main_vlayout.addWidget(self.ribbon)
 
-        # 3. Viewport & Canvas Area
+        # 3. Viewport & Canvas Area (OpenGL 3D Canvas + ViewCube + Floating NavBar)
         self.viewport = Viewport3D(self)
         main_vlayout.addWidget(self.viewport, stretch=1)
 
-        # 4. Parametric Feature Timeline
+        # 4. Parametric Feature Timeline (Bottom History Track)
         self.timeline = FeatureTimeline(self)
         main_vlayout.addWidget(self.timeline)
 
-        # 5. Bottom Status Bar
+        # 5. Bottom Status Bar (Readouts & Diagnostics)
         self.status_bar = StatusBar(self)
         main_vlayout.addWidget(self.status_bar)
 
         # --- Dock Widgets ---
 
-        # Left Dock: Model Browser
-        self.dock_browser = QDockWidget("Browser", self)
+        # Left Dock: Model Browser (Fusion 360 Hierarchy)
+        self.dock_browser = QDockWidget(self)
         self.dock_browser.setAllowedAreas(Qt.LeftDockWidgetArea | Qt.RightDockWidgetArea)
         self.dock_browser.setFeatures(QDockWidget.DockWidgetMovable | QDockWidget.DockWidgetFloatable)
+        self.dock_browser.setTitleBarWidget(QWidget())
         self.browser = ModelBrowser(self.dock_browser)
         self.dock_browser.setWidget(self.browser)
-        self.dock_browser.setMinimumWidth(230)
+        self.dock_browser.setMinimumWidth(255)
         self.addDockWidget(Qt.LeftDockWidgetArea, self.dock_browser)
 
-        # Right Dock: Contextual Parameters & Learning Panel
-        self.dock_properties = QDockWidget("Parameters", self)
+        # Right Dock: Contextual Parameters Palette
+        self.dock_properties = QDockWidget(self)
         self.dock_properties.setAllowedAreas(Qt.RightDockWidgetArea | Qt.LeftDockWidgetArea)
         self.dock_properties.setFeatures(QDockWidget.DockWidgetMovable | QDockWidget.DockWidgetFloatable)
+        self.dock_properties.setTitleBarWidget(QWidget())
         self.property_panel = PropertyPanel(self.dock_properties)
         self.dock_properties.setWidget(self.property_panel)
-        self.dock_properties.setMinimumWidth(260)
+        self.dock_properties.setMinimumWidth(280)
         self.dock_properties.setVisible(False)
         self.addDockWidget(Qt.RightDockWidgetArea, self.dock_properties)
 
+        # Learning Panel Dock
         self.dock_learning = QDockWidget("Automobile Engineering Tutorials", self)
         self.dock_learning.setAllowedAreas(Qt.RightDockWidgetArea | Qt.LeftDockWidgetArea)
         self.dock_learning.setFeatures(QDockWidget.DockWidgetMovable | QDockWidget.DockWidgetFloatable)
@@ -111,6 +123,7 @@ class MainWindow(QMainWindow):
         self.header.redo_triggered.connect(self._handle_redo)
         self.header.new_tab_requested.connect(self._new_design)
         self.header.learning_toggled.connect(self._toggle_learning_mode)
+        self.header.parameters_requested.connect(self._open_parameters_dialog)
 
         # Ribbon actions
         self.ribbon.command_triggered.connect(self._handle_ribbon_command)
@@ -119,19 +132,26 @@ class MainWindow(QMainWindow):
         # Viewport signals
         self.viewport.cursor_moved.connect(self.status_bar.set_coordinates)
         self.viewport.selection_changed.connect(self._on_viewport_selection)
+        self.viewport.plane_picked.connect(self._create_new_sketch)
+        self.viewport.sketch_modified.connect(self._on_sketch_geometry_modified)
+        self.viewport.command_requested.connect(self._handle_ribbon_command)
 
         # Browser signals
         self.browser.item_selected.connect(self._on_browser_selection)
         self.browser.edit_sketch_requested.connect(self._edit_sketch)
+        self.browser.create_sketch_requested.connect(self._create_new_sketch)
         self.browser.delete_item_requested.connect(self._delete_item)
 
         # Timeline signals
         self.timeline.rollback_changed.connect(self._on_rollback_changed)
+        self.timeline.feature_edit_requested.connect(self._edit_feature)
+        self.timeline.feature_suppress_requested.connect(self._toggle_feature_suppression)
         self.timeline.feature_delete_requested.connect(self._delete_feature)
 
         # Property panel signals
+        self.property_panel.preview_changed.connect(self._on_property_preview_changed)
         self.property_panel.confirmed.connect(self._on_property_confirmed)
-        self.property_panel.cancelled.connect(lambda: self.dock_properties.setVisible(False))
+        self.property_panel.cancelled.connect(self._on_property_cancelled)
 
         # Learning panel signals
         self.learning_panel.load_model_requested.connect(self._load_learning_exercise)
@@ -243,50 +263,89 @@ class MainWindow(QMainWindow):
     def _toggle_learning_mode(self, checked: bool):
         self.dock_learning.setVisible(checked)
 
-    # --- Ribbon Command Dispatcher ---
+    # --- Fusion 360 Commands Dispatcher ---
 
     def _handle_ribbon_command(self, cmd: str):
-        # 3D Solid Features
+        # 1. Sketch Creation
         if cmd == "create_sketch":
-            self._create_new_sketch()
+            self.viewport.start_plane_selection()
+            self.status_bar.set_selection_info("Select a plane or planar face to begin sketch...")
+
+        # 2. 3D Features (Extrude, Revolve, Hole, Fillet, Chamfer, Shell, Combine, Primitives)
         elif cmd == "extrude":
-            if not self.doc.sketches:
-                QMessageBox.information(self, "Extrude", "Create a sketch profile first using 'Create Sketch'.")
-                return
-            sk_id = self.active_sketch_id or list(self.doc.sketches.keys())[-1]
-            self.property_panel.show_extrude(sk_id)
-            self.dock_properties.setVisible(True)
+            self._trigger_extrude()
         elif cmd == "revolve":
-            if not self.doc.sketches:
-                QMessageBox.information(self, "Revolve", "Create a sketch profile first using 'Create Sketch'.")
+            self._trigger_revolve()
+        elif cmd == "hole":
+            if self.doc.current_solid is None:
+                QMessageBox.information(self, "Hole", "Create a 3D solid first.")
                 return
-            sk_id = self.active_sketch_id or list(self.doc.sketches.keys())[-1]
-            self.property_panel.show_revolve(sk_id)
+            self._editing_feature_id = None
+            self.property_panel.show_hole()
             self.dock_properties.setVisible(True)
         elif cmd == "fillet":
             if self.doc.current_solid is None:
                 QMessageBox.information(self, "Fillet", "Create a 3D solid first.")
                 return
+            self._editing_feature_id = None
             self.property_panel.show_fillet()
             self.dock_properties.setVisible(True)
         elif cmd == "chamfer":
             if self.doc.current_solid is None:
                 QMessageBox.information(self, "Chamfer", "Create a 3D solid first.")
                 return
+            self._editing_feature_id = None
             self.property_panel.show_chamfer()
             self.dock_properties.setVisible(True)
-        elif cmd == "hole":
+        elif cmd == "shell":
             if self.doc.current_solid is None:
-                QMessageBox.information(self, "Hole", "Create a 3D solid first.")
+                QMessageBox.information(self, "Shell", "Create a 3D solid first.")
                 return
-            self.property_panel.show_hole()
+            self._editing_feature_id = None
+            self.property_panel.show_shell()
+            self.dock_properties.setVisible(True)
+        elif cmd in ("combine", "bool_fuse", "bool_cut", "bool_intersect"):
+            self._editing_feature_id = None
+            self.property_panel.show_combine()
+            self.dock_properties.setVisible(True)
+        elif cmd == "split_body":
+            if self.doc.current_solid is None:
+                QMessageBox.information(self, "Split Body", "Create a 3D solid first.")
+                return
+            self._editing_feature_id = None
+            self.property_panel.show_split_body()
+            self.dock_properties.setVisible(True)
+        elif cmd == "mirror":
+            if self.doc.current_solid is None:
+                QMessageBox.information(self, "Mirror", "Create a 3D solid first.")
+                return
+            self._editing_feature_id = None
+            self.property_panel.show_mirror()
+            self.dock_properties.setVisible(True)
+        elif cmd == "pattern_linear":
+            if self.doc.current_solid is None:
+                QMessageBox.information(self, "Pattern", "Create a 3D solid first.")
+                return
+            self._editing_feature_id = None
+            self.property_panel.show_pattern_linear()
+            self.dock_properties.setVisible(True)
+        elif cmd == "pattern_circular":
+            if self.doc.current_solid is None:
+                QMessageBox.information(self, "Pattern", "Create a 3D solid first.")
+                return
+            self._editing_feature_id = None
+            self.property_panel.show_pattern_circular()
             self.dock_properties.setVisible(True)
         elif cmd == "prim_box":
+            self._editing_feature_id = None
             self.property_panel.show_box()
             self.dock_properties.setVisible(True)
         elif cmd == "prim_cylinder":
+            self._editing_feature_id = None
             self.property_panel.show_cylinder()
             self.dock_properties.setVisible(True)
+        elif cmd == "parameters":
+            self._open_parameters_dialog()
         elif cmd == "measure":
             if self.doc.current_solid is not None and not self.doc.current_solid.IsNull():
                 dx, dy, dz = SolidOperations.get_bounding_dimensions(self.doc.current_solid)
@@ -308,11 +367,38 @@ class MainWindow(QMainWindow):
                 except Exception as e:
                     QMessageBox.critical(self, "Import Error", f"Failed to import STEP solid:\n{e}")
 
-        # 2D Sketch Commands
-        elif cmd.startswith("sketch_"):
-            self._handle_sketch_primitive(cmd)
+        # 3. In-Canvas 2D Sketch Tools
+        elif cmd in ("sketch_line", "sketch_rect", "sketch_center_rect", "sketch_circle", "sketch_dimension"):
+            tool_name = cmd.replace("sketch_", "")
+            if not self.active_sketch_id:
+                # If not in sketch mode, start plane picker and queue tool
+                self._pending_sketch_tool = tool_name
+                self.viewport.start_plane_selection()
+                self.status_bar.set_selection_info(f"Select plane to begin {tool_name.capitalize()}...")
+            else:
+                self.viewport.set_sketch_tool(tool_name)
+                self.status_bar.set_selection_info(f"Sketch Tool: {tool_name.capitalize()} (Click canvas to draw)")
+
         elif cmd.startswith("constrain_"):
             self._handle_sketch_constraint(cmd)
+
+    def _trigger_extrude(self):
+        if not self.doc.sketches:
+            QMessageBox.information(self, "Extrude", "Create a sketch profile first using 'Create Sketch' (L, R, C).")
+            return
+        sk_id = self.active_sketch_id or list(self.doc.sketches.keys())[-1]
+        self._editing_feature_id = None
+        self.property_panel.show_extrude(sk_id)
+        self.dock_properties.setVisible(True)
+
+    def _trigger_revolve(self):
+        if not self.doc.sketches:
+            QMessageBox.information(self, "Revolve", "Create a sketch profile first using 'Create Sketch' (L, R, C).")
+            return
+        sk_id = self.active_sketch_id or list(self.doc.sketches.keys())[-1]
+        self._editing_feature_id = None
+        self.property_panel.show_revolve(sk_id)
+        self.dock_properties.setVisible(True)
 
     # --- Sketch Mode Workflow ---
 
@@ -324,7 +410,13 @@ class MainWindow(QMainWindow):
         # Switch to contextual sketch ribbon & viewport sketch mode
         self.ribbon.set_sketch_mode(True)
         self.viewport.set_sketch(sketch)
-        self.status_bar.set_solver_status(True, 0, "Sketch Created (XY Plane)")
+        if self._pending_sketch_tool:
+            self.viewport.set_sketch_tool(self._pending_sketch_tool)
+            self._pending_sketch_tool = None
+        else:
+            self.viewport.set_sketch_tool("line")
+
+        self.status_bar.set_solver_status(True, 0, f"Sketch Active ({plane} Plane)")
         self._refresh_all()
 
     def _edit_sketch(self, sketch_id: str):
@@ -336,6 +428,16 @@ class MainWindow(QMainWindow):
         self.viewport.set_sketch(sk)
         self._refresh_all()
 
+    def _on_sketch_geometry_modified(self):
+        """Called when user interactively adds lines/rectangles/circles in the viewport."""
+        self.doc.push_undo_state()
+        if self.active_sketch_id:
+            sk = self.doc.get_sketch(self.active_sketch_id)
+            if sk and sk.last_result:
+                self.status_bar.set_solver_status(sk.last_result.success, sk.last_result.dof, sk.last_result.message)
+        self.browser.refresh(self.doc)
+        self.viewport.update()
+
     def _finish_sketch(self):
         if self.active_sketch_id:
             sk = self.doc.get_sketch(self.active_sketch_id)
@@ -346,40 +448,7 @@ class MainWindow(QMainWindow):
         self.ribbon.set_sketch_mode(False)
         self.viewport.set_sketch(None)
         self.active_sketch_id = None
-        self._refresh_all()
-
-    def _handle_sketch_primitive(self, cmd: str):
-        if not self.active_sketch_id:
-            return
-        sk = self.doc.get_sketch(self.active_sketch_id)
-        if not sk:
-            return
-
-        self.doc.push_undo_state()
-        if cmd == "sketch_rect":
-            # 2-Point Rectangle 40 x 30 mm
-            sk.add_rect(0.0, 0.0, 40.0, 30.0)
-            sk.solve()
-        elif cmd == "sketch_center_rect":
-            # Center Rectangle 50 x 50 mm
-            sk.add_center_rect(0.0, 0.0, 50.0, 50.0)
-            sk.solve()
-        elif cmd == "sketch_circle":
-            # Circle dia 30 mm
-            sk.add_circle(0.0, 0.0, 15.0)
-            sk.solve()
-        elif cmd == "sketch_line":
-            p1 = sk.add_point(0.0, 0.0)
-            p2 = sk.add_point(30.0, 0.0)
-            sk.add_line(p1, p2)
-            sk.solve()
-        elif cmd == "sketch_dimension":
-            # Dimension width & height
-            if sk.lines:
-                lid = list(sk.lines.keys())[0]
-                sk.add_constraint("distance", [lid], 25.0)
-                sk.solve()
-
+        self.viewport.set_standard_view("home")
         self._refresh_all()
 
     def _handle_sketch_constraint(self, cmd: str):
@@ -404,20 +473,134 @@ class MainWindow(QMainWindow):
         sk.solve()
         self._refresh_all()
 
-    # --- Feature Execution ---
+    # --- Feature Execution & History ---
 
     def _on_property_confirmed(self, tool: str, params: dict):
         self.doc.push_undo_state()
         self.dock_properties.setVisible(False)
+        self.viewport.set_preview_shape(None)
 
-        # Add feature to parametric history
-        self.doc.history.add_feature(tool, params)
+        if self._editing_feature_id:
+            feat = self.doc.history.get_feature(self._editing_feature_id)
+            if feat:
+                feat.params.update(params)
+            self._editing_feature_id = None
+        else:
+            self.doc.history.add_feature(tool, params)
+
         success, err = self.doc.recompute()
         if not success:
             QMessageBox.critical(self, "Feature Failed", f"Operation failed:\n{err}")
 
         self._refresh_all()
         self.viewport.fit_all()
+
+    def _on_property_cancelled(self):
+        self.dock_properties.setVisible(False)
+        self._editing_feature_id = None
+        self.viewport.set_preview_shape(None)
+
+    def _on_property_preview_changed(self, tool: str, params: dict):
+        """Generates live interactive B-Rep solid preview in the 3D viewport."""
+        try:
+            if tool == "extrude":
+                sk_id = params.get("sketch_id") or self.active_sketch_id
+                if not sk_id and self.doc.sketches:
+                    sk_id = list(self.doc.sketches.keys())[-1]
+                sk = self.doc.sketches.get(sk_id)
+                if sk:
+                    dist_raw = params.get("distance", 20.0)
+                    dist_val = float(self.doc.parameters.get_value(dist_raw))
+                    if abs(dist_val) > 1e-3:
+                        direction = sk.get_plane_normal()
+                        is_sym = bool(params.get("symmetric", False) or (params.get("direction_type") == "Symmetric"))
+                        face = sk.to_occ_face()
+                        preview_shape = SolidOperations.extrude_face(face, dist_val, direction, symmetric=is_sym)
+                        self.viewport.set_preview_shape(preview_shape)
+                        return
+            elif tool == "box":
+                l = float(self.doc.parameters.get_value(params.get("length", 50.0)))
+                w = float(self.doc.parameters.get_value(params.get("width", 50.0)))
+                h = float(self.doc.parameters.get_value(params.get("height", 50.0)))
+                if l > 0 and w > 0 and h > 0:
+                    preview_shape = SolidOperations.make_box(l, w, h)
+                    self.viewport.set_preview_shape(preview_shape)
+                    return
+            elif tool == "cylinder":
+                r = float(self.doc.parameters.get_value(params.get("radius", 25.0)))
+                h = float(self.doc.parameters.get_value(params.get("height", 50.0)))
+                if r > 0 and h > 0:
+                    preview_shape = SolidOperations.make_cylinder(r, h)
+                    self.viewport.set_preview_shape(preview_shape)
+                    return
+            elif tool == "fillet":
+                if self.doc.current_solid is not None and not self.doc.current_solid.IsNull():
+                    rad = float(self.doc.parameters.get_value(params.get("radius", 2.0)))
+                    if rad > 0:
+                        preview_shape = SolidOperations.make_fillet(self.doc.current_solid, rad)
+                        self.viewport.set_preview_shape(preview_shape)
+                        return
+            elif tool == "chamfer":
+                if self.doc.current_solid is not None and not self.doc.current_solid.IsNull():
+                    dist = float(self.doc.parameters.get_value(params.get("distance", 2.0)))
+                    if dist > 0:
+                        preview_shape = SolidOperations.make_chamfer(self.doc.current_solid, dist)
+                        self.viewport.set_preview_shape(preview_shape)
+                        return
+        except Exception:
+            pass
+        self.viewport.set_preview_shape(None)
+
+    def _toggle_feature_suppression(self, feature_id: str):
+        for feat in self.doc.history.features:
+            if feat.feature_id == feature_id:
+                self.doc.push_undo_state()
+                feat.is_suppressed = not feat.is_suppressed
+                self.doc.recompute()
+                self._refresh_all()
+                status_str = "Suppressed" if feat.is_suppressed else "Unsuppressed"
+                self.status_bar.set_selection_info(f"Feature '{feat.name}' {status_str}.")
+                break
+
+    def _edit_feature(self, feature_id: str):
+        feat = self.doc.history.get_feature(feature_id)
+        if not feat:
+            return
+        self._editing_feature_id = feature_id
+        k = feat.kind
+        p = feat.params
+
+        if k == "extrude":
+            sk_id = p.get("sketch_id", "")
+            dist = float(self.doc.parameters.get_value(p.get("distance", 20.0)))
+            self.property_panel.show_extrude(sk_id, default_dist=dist)
+        elif k == "revolve":
+            sk_id = p.get("sketch_id", "")
+            self.property_panel.show_revolve(sk_id)
+        elif k == "hole":
+            self.property_panel.show_hole()
+        elif k == "fillet":
+            self.property_panel.show_fillet()
+        elif k == "chamfer":
+            self.property_panel.show_chamfer()
+        elif k == "shell":
+            self.property_panel.show_shell()
+        elif k == "combine":
+            self.property_panel.show_combine()
+        elif k == "split_body":
+            self.property_panel.show_split_body()
+        elif k == "mirror":
+            self.property_panel.show_mirror()
+        elif k == "pattern_linear":
+            self.property_panel.show_pattern_linear()
+        elif k == "pattern_circular":
+            self.property_panel.show_pattern_circular()
+        elif k == "box":
+            self.property_panel.show_box()
+        elif k == "cylinder":
+            self.property_panel.show_cylinder()
+
+        self.dock_properties.setVisible(True)
 
     def _on_rollback_changed(self, new_index: int):
         self.doc.history.rollback_to(new_index)
@@ -436,12 +619,15 @@ class MainWindow(QMainWindow):
             del self.doc.sketches[item_id]
             self.doc.recompute()
             self._refresh_all()
+        elif item_type == "body":
+            self.doc.current_solid = None
+            self._refresh_all()
 
     def _on_viewport_selection(self, item_type: str, item_id: str):
         if item_type == "body" and item_id:
             if self.doc.current_solid is not None:
                 dx, dy, dz = SolidOperations.get_bounding_dimensions(self.doc.current_solid)
-                self.status_bar.set_selection_info(f"Selected: Body 1  (Extents: {dx:.2f} × {dy:.2f} × {dz:.2f} mm)")
+                self.status_bar.set_selection_info(f"Selected: Body 1  ({dx:.2f} × {dy:.2f} × {dz:.2f} mm)")
         else:
             self.status_bar.set_selection_info("Ready")
 
@@ -455,6 +641,93 @@ class MainWindow(QMainWindow):
             if self.doc.current_solid is not None:
                 dx, dy, dz = SolidOperations.get_bounding_dimensions(self.doc.current_solid)
                 self.status_bar.set_selection_info(f"Selected: Body 1  ({dx:.2f} × {dy:.2f} × {dz:.2f} mm)")
+
+    # --- Fusion 360 Parameters & Shortcuts Dialogs ---
+
+    def _open_parameters_dialog(self):
+        dlg = ParametersDialog(self.doc.parameters, self)
+        dlg.parameters_updated.connect(self._on_parameters_updated)
+        dlg.exec()
+
+    def _on_parameters_updated(self):
+        self.doc.push_undo_state()
+        self.doc.recompute()
+        self._refresh_all()
+
+    def _open_shortcuts_popup(self):
+        if self._shortcut_popup is None:
+            self._shortcut_popup = ShortcutSearchPopup(self)
+            self._shortcut_popup.command_selected.connect(self._handle_ribbon_command)
+        self._shortcut_popup.show_at_cursor()
+
+    # --- Keyboard Shortcuts (Fusion 360 Parity) ---
+
+    def keyPressEvent(self, event: QKeyEvent):
+        key = event.key()
+        ctrl = bool(event.modifiers() & Qt.ControlModifier)
+
+        if ctrl and key == Qt.Key_Z:
+            self._handle_undo()
+            return
+        elif ctrl and key == Qt.Key_Y:
+            self._handle_redo()
+            return
+        elif ctrl and key == Qt.Key_S:
+            self._handle_file_action("save")
+            return
+        elif ctrl and key == Qt.Key_N:
+            self._new_design()
+            return
+
+        if key == Qt.Key_Escape:
+            if self.dock_properties.isVisible():
+                self._on_property_cancelled()
+                return
+            if self.viewport.plane_selection_mode:
+                self.viewport.cancel_plane_selection()
+                self.status_bar.set_selection_info("Ready")
+                return
+            if self.viewport.is_sketch_mode:
+                self.viewport.set_sketch_tool("select")
+                self.status_bar.set_selection_info("Sketch: Select mode")
+                return
+            self.viewport.selected_body = False
+            self.viewport.update()
+            self.status_bar.set_selection_info("Ready")
+            return
+
+        if key == Qt.Key_S:
+            self._open_shortcuts_popup()
+            return
+        elif key == Qt.Key_L:
+            self._handle_ribbon_command("sketch_line")
+            return
+        elif key == Qt.Key_R:
+            self._handle_ribbon_command("sketch_rect")
+            return
+        elif key == Qt.Key_C:
+            self._handle_ribbon_command("sketch_circle")
+            return
+        elif key == Qt.Key_D:
+            self._handle_ribbon_command("sketch_dimension")
+            return
+        elif key == Qt.Key_E:
+            self._trigger_extrude()
+            return
+        elif key == Qt.Key_F:
+            self._handle_ribbon_command("fillet")
+            return
+        elif key == Qt.Key_H:
+            self._handle_ribbon_command("hole")
+            return
+        elif key == Qt.Key_I:
+            self._handle_ribbon_command("measure")
+            return
+        elif key == Qt.Key_F6:
+            self.viewport.fit_all()
+            return
+
+        super().keyPressEvent(event)
 
     # --- Automobile Engineering Learning Mode ---
 

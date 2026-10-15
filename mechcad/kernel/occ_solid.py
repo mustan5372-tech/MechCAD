@@ -29,6 +29,8 @@ from OCP.BRepBuilderAPI import (
     BRepBuilderAPI_Transform,
     BRepBuilderAPI_Copy,
 )
+from OCP.BRepOffsetAPI import BRepOffsetAPI_MakeThickSolid
+from OCP.collections import List_TopoDS_Shape
 from OCP.BRepBndLib import BRepBndLib
 from OCP.Bnd import Bnd_Box
 from OCP.TopExp import TopExp_Explorer
@@ -159,7 +161,7 @@ class SolidOperations:
     # --- 3D Feature Operations ---
 
     @staticmethod
-    def extrude_face(face: TopoDS_Face, distance: float, direction: Tuple[float, float, float] = (0.0, 0.0, 1.0)) -> TopoDS_Shape:
+    def extrude_face(face: TopoDS_Face, distance: float, direction: Tuple[float, float, float] = (0.0, 0.0, 1.0), symmetric: bool = False) -> TopoDS_Shape:
         """Extrudes a planar face along direction vector by given distance."""
         if distance == 0:
             raise ValueError("Extrude distance cannot be zero")
@@ -168,8 +170,17 @@ class SolidOperations:
         if mag == 0:
             vx, vy, vz = 0.0, 0.0, 1.0
             mag = 1.0
-        vec = gp_Vec((vx / mag) * distance, (vy / mag) * distance, (vz / mag) * distance)
-        maker = BRepPrimAPI_MakePrism(face, vec)
+
+        if symmetric:
+            trsf = gp_Trsf()
+            trsf.SetTranslation(gp_Vec(-(vx / mag) * distance, -(vy / mag) * distance, -(vz / mag) * distance))
+            trans_face = BRepBuilderAPI_Transform(face, trsf, True).Shape()
+            vec = gp_Vec((vx / mag) * (distance * 2.0), (vy / mag) * (distance * 2.0), (vz / mag) * (distance * 2.0))
+            maker = BRepPrimAPI_MakePrism(TopoDS.Face(trans_face), vec)
+        else:
+            vec = gp_Vec((vx / mag) * distance, (vy / mag) * distance, (vz / mag) * distance)
+            maker = BRepPrimAPI_MakePrism(face, vec)
+
         maker.Build()
         if not maker.IsDone():
             raise RuntimeError("Extrude prism operation failed")
@@ -327,3 +338,69 @@ class SolidOperations:
             copy_shape = BRepBuilderAPI_Transform(shape, trsf, True).Shape()
             fused = SolidOperations.boolean_fuse(fused, copy_shape)
         return fused
+
+    @staticmethod
+    def make_shell(shape: TopoDS_Shape, thickness: float, face_indices: Optional[List[int]] = None) -> TopoDS_Shape:
+        """Hollows out a solid body with given wall thickness (Fusion 360 Shell command)."""
+        if thickness <= 0:
+            raise ValueError("Shell thickness must be positive")
+        closing_faces = List_TopoDS_Shape()
+        exp = TopExp_Explorer(shape, TopAbs_FACE)
+        idx = 0
+        while exp.More():
+            if face_indices is not None and idx in face_indices:
+                closing_faces.Append(exp.Current())
+            elif face_indices is None and idx == 0:
+                # Default: remove top face
+                closing_faces.Append(exp.Current())
+            idx += 1
+            exp.Next()
+
+        maker = BRepOffsetAPI_MakeThickSolid()
+        maker.MakeThickSolidByJoin(shape, closing_faces, -float(thickness), 1.e-3)
+        maker.Build()
+        if not maker.IsDone():
+            raise RuntimeError(f"Shell operation failed with thickness {thickness} mm")
+        return maker.Shape()
+
+    @staticmethod
+    def make_mirror(shape: TopoDS_Shape, plane: str = "XY",
+                    center: Tuple[float, float, float] = (0.0, 0.0, 0.0)) -> TopoDS_Shape:
+        """Mirrors the solid shape across a principal plane (XY, XZ, or YZ)."""
+        trsf = gp_Trsf()
+        p0 = gp_Pnt(*center)
+        pl = plane.upper()
+        if pl == "XY":
+            normal = gp_Dir(0.0, 0.0, 1.0)
+        elif pl == "XZ":
+            normal = gp_Dir(0.0, 1.0, 0.0)
+        elif pl == "YZ":
+            normal = gp_Dir(1.0, 0.0, 0.0)
+        else:
+            normal = gp_Dir(0.0, 0.0, 1.0)
+        trsf.SetMirror(gp_Ax2(p0, normal))
+        return BRepBuilderAPI_Transform(shape, trsf, True).Shape()
+
+    @staticmethod
+    def split_body(shape: TopoDS_Shape, plane: str = "XY", offset: float = 0.0) -> TopoDS_Shape:
+        """Splits body with a cutting plane and returns the retained half."""
+        xmin, ymin, zmin, xmax, ymax, zmax = SolidOperations.get_bounding_box(shape)
+        span_x = max(xmax - xmin, 10.0) * 3.0
+        span_y = max(ymax - ymin, 10.0) * 3.0
+        span_z = max(zmax - zmin, 10.0) * 3.0
+
+        pl = plane.upper()
+        if pl == "XY":
+            cutter = SolidOperations.make_box(span_x, span_y, span_z,
+                                              xmin - 5.0, ymin - 5.0, offset)
+        elif pl == "XZ":
+            cutter = SolidOperations.make_box(span_x, span_y, span_z,
+                                              xmin - 5.0, offset, zmin - 5.0)
+        elif pl == "YZ":
+            cutter = SolidOperations.make_box(span_x, span_y, span_z,
+                                              offset, ymin - 5.0, zmin - 5.0)
+        else:
+            cutter = SolidOperations.make_box(span_x, span_y, span_z,
+                                              xmin - 5.0, ymin - 5.0, offset)
+        return SolidOperations.boolean_cut(shape, cutter)
+

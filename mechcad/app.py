@@ -25,6 +25,14 @@ def main():
     app.setApplicationDisplayName("MechCAD")
     app.setOrganizationName("MechCAD")
 
+    # Load Windows standard engineering fonts
+    from PySide6.QtGui import QFontDatabase, QFont
+    for font_file in ["segoeui.ttf", "segoeuib.ttf", "seguiemj.ttf", "arial.ttf"]:
+        fp = os.path.join("C:/Windows/Fonts", font_file)
+        if os.path.exists(fp):
+            QFontDatabase.addApplicationFont(fp)
+    app.setFont(QFont("Segoe UI", 9))
+
     window = MainWindow()
     window.show()
 

@@ -70,13 +70,35 @@ d:\MasterCAD\.venv\Scripts\python.exe run_mechcad.py
 +---------------------------------------------------------------------------------------------------------+
 ```
 
-### Key Controls
-- **Orbit 3D Canvas:** `Shift + Middle Mouse Drag` (or Orbit tool in NavBar / ViewCube)
-- **Pan Canvas:** `Middle Mouse Drag` (or Pan tool in NavBar)
-- **Zoom Canvas:** `Mouse Wheel`
-- **Fit to Window:** `F6` or Fit icon in floating NavBar
-- **Standard Views:** Click faces on the interactive ViewCube (`TOP`, `FRONT`, `RIGHT`, `HOME`)
-- **Undo / Redo:** `Ctrl + Z` / `Ctrl + Y`
+### Fusion 360 Commands & Shortcuts Reference
+- **S Key Design Shortcuts Search:** Press `S` anywhere in the modeling canvas to open the instant floating command search popup with quick tool badges.
+- **Create Sketch:** Click `✏ Create Sketch` or press `L`/`R`/`C`. The viewport highlights the 3 Origin Planes (`XY`, `XZ`, `YZ`). Click a plane to align camera and enter 2D sketch mode.
+- **In-Canvas Interactive Drawing:**
+  - **Line (`L`):** Click point 1, drag with live Length and Angle Heads-Up Display (HUD), click point 2. Continuous chaining with automatic snapping to origin and endpoints.
+  - **2-Point Rectangle (`R`):** Click corner 1, drag with Width & Height HUD, click corner 2. Automatically applies coincident corners and horizontal/vertical constraints.
+  - **Center Rectangle:** Click center, drag corner.
+  - **Center Diameter Circle (`C`):** Click center, drag with diameter HUD, click to place.
+  - **Sketch Dimension (`D`):** Click line or two points, drag out witness lines, enter exact dimension.
+  - **Finish Sketch:** Click prominent `[✔ FINISH SKETCH]` in top-right to return to 3D mode with shaded closed profiles.
+- **3D Parametric Features:**
+  - **Extrude (`E`):** Distance, Direction (One Side, Two Sides, Symmetric), Operation (Join, Cut, New Body, Intersect).
+  - **Revolve:** Axis (X, Y, Z), Angle (360° or partial), Operation.
+  - **Hole (`H`):** Diameter, Depth, Through All, Counterbore / Countersink.
+  - **Fillet (`F`):** Constant radius fillet on mechanical edges.
+  - **Chamfer:** Equal distance chamfer on edges.
+  - **Shell:** Hollow out solid body with uniform wall thickness.
+  - **Combine:** Boolean Join (Union), Cut (Subtract), Intersect (Common).
+  - **Split Body:** Cut body with reference plane.
+  - **Pattern:** Rectangular Pattern (X & Y counts/spacings) and Circular Polar Pattern.
+  - **Mirror:** Mirror solid body across XY, XZ, or YZ plane.
+- **Manage Parameters (`fx`):** Click `fx` in header, ribbon, or press `S` to manage Model Parameters (`d1`, `d2`, ...) and custom User Parameters. Supports algebraic formulas (`length / 2`, `sqrt(...)`, `d1 * 2`).
+- **Viewport Navigation:**
+  - **Orbit 3D Canvas:** `Shift + Middle Mouse Drag` (with orbit pivot marker)
+  - **Pan Canvas:** `Middle Mouse Drag`
+  - **Zoom Canvas:** `Mouse Wheel` (centered on cursor)
+  - **Fit to Window:** Double-Click Middle Mouse Button or `F6`
+  - **Interactive ViewCube:** Click faces (`FRONT`, `TOP`, `RIGHT`), corners (isometric angles), or Home icon (`⌂`).
+  - **Undo / Redo:** `Ctrl + Z` / `Ctrl + Y`
 
 ---
 
