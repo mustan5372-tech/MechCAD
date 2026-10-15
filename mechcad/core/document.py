@@ -25,6 +25,7 @@ class CADDocument:
         self.parameters = ParameterManager()
 
         self.sketches: Dict[str, Sketch] = {}
+        self.construction_planes: Dict[str, Dict[str, Any]] = {}
         self.history = FeatureHistory()
 
         self.current_solid: Optional[TopoDS_Shape] = None
@@ -66,15 +67,31 @@ class CADDocument:
         self.recompute()
         return True
 
-    # --- Sketch Management ---
+    # --- Sketch & Construction Plane Management ---
 
-    def create_sketch(self, name: Optional[str] = None, plane: str = "XY") -> Sketch:
+    def create_sketch(self, name: Optional[str] = None, plane: str = "XY", offset: float = 0.0) -> Sketch:
         sid = f"sketch_{len(self.sketches) + 1}"
         sk_name = name or f"Sketch {len(self.sketches) + 1}"
-        sketch = Sketch(sid, name=sk_name, plane=plane)
+        sketch = Sketch(sid, name=sk_name, plane=plane, offset=offset)
         self.sketches[sid] = sketch
         self.is_dirty = True
         return sketch
+
+    def add_construction_plane(self, plane_type: str = "offset", base_plane: str = "XY",
+                               offset: float = 0.0, angle: float = 0.0) -> str:
+        pid = f"cplane_{len(self.construction_planes) + 1}"
+        name = f"Plane {len(self.construction_planes) + 1} ({base_plane.upper()} +{offset:.1f}mm)"
+        self.construction_planes[pid] = {
+            "id": pid,
+            "name": name,
+            "type": plane_type,
+            "base_plane": base_plane.upper(),
+            "offset": float(offset),
+            "angle": float(angle),
+            "is_visible": True,
+        }
+        self.is_dirty = True
+        return pid
 
     def get_sketch(self, sketch_id: str) -> Optional[Sketch]:
         return self.sketches.get(sketch_id)
@@ -229,6 +246,48 @@ class CADDocument:
                     offset = self.parameters.get_value(p.get("offset", 0.0))
                     solid = SolidOperations.split_body(solid, plane, offset)
 
+                elif k == "move":
+                    if solid is None:
+                        raise ValueError("No solid exists to move")
+                    dx = self.parameters.get_value(p.get("dx", 0.0))
+                    dy = self.parameters.get_value(p.get("dy", 0.0))
+                    dz = self.parameters.get_value(p.get("dz", 0.0))
+                    rx = self.parameters.get_value(p.get("rx", 0.0))
+                    ry = self.parameters.get_value(p.get("ry", 0.0))
+                    rz = self.parameters.get_value(p.get("rz", 0.0))
+                    solid = SolidOperations.transform_shape(solid, dx, dy, dz, rx, ry, rz)
+
+                elif k == "sweep":
+                    prof_id = p.get("profile_sketch_id")
+                    path_id = p.get("path_sketch_id")
+                    prof_sk = self.sketches.get(prof_id)
+                    path_sk = self.sketches.get(path_id)
+                    if not prof_sk or not path_sk:
+                        raise ValueError("Sweep requires both profile sketch and path sketch")
+                    face = prof_sk.to_occ_face()
+                    wire = path_sk.to_occ_wire()
+                    new_shape = SolidOperations.sweep_face_along_wire(face, wire)
+                    solid = self._apply_solid_operation(solid, new_shape, p.get("operation", "new_body"))
+
+                elif k == "loft":
+                    sk_ids = p.get("sketch_ids", [])
+                    wires = []
+                    for sid in sk_ids:
+                        sk = self.sketches.get(sid)
+                        if sk:
+                            wires.append(sk.to_occ_wire())
+                    if len(wires) < 2:
+                        raise ValueError("Loft requires at least two sketch profiles")
+                    new_shape = SolidOperations.loft_wires(wires, is_solid=True)
+                    solid = self._apply_solid_operation(solid, new_shape, p.get("operation", "new_body"))
+
+                elif k in ("construct_plane", "plane"):
+                    ptype = p.get("type", "offset")
+                    bplane = p.get("base_plane", "XY")
+                    poffset = self.parameters.get_value(p.get("offset", 0.0))
+                    pangle = self.parameters.get_value(p.get("angle", 0.0))
+                    self.add_construction_plane(ptype, bplane, poffset, pangle)
+
             except Exception as e:
                 feat.error_message = str(e)
                 # Fail gracefully: don't crash, report broken feature
@@ -257,6 +316,7 @@ class CADDocument:
             "units": self.units.length_unit,
             "parameters": self.parameters.to_dict(),
             "sketches": {sid: sk.to_dict() for sid, sk in self.sketches.items()},
+            "construction_planes": self.construction_planes,
             "history": self.history.to_list(),
             "rollback_index": self.history.rollback_index,
         }
@@ -269,6 +329,7 @@ class CADDocument:
         self.sketches.clear()
         for sid, sdata in data.get("sketches", {}).items():
             self.sketches[sid] = Sketch.from_dict(sdata)
+        self.construction_planes = data.get("construction_planes", {})
         self.history.from_list(data.get("history", []))
         self.history.rollback_index = data.get("rollback_index", len(self.history.features))
 

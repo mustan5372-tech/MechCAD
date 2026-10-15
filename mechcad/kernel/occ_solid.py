@@ -29,7 +29,11 @@ from OCP.BRepBuilderAPI import (
     BRepBuilderAPI_Transform,
     BRepBuilderAPI_Copy,
 )
-from OCP.BRepOffsetAPI import BRepOffsetAPI_MakeThickSolid
+from OCP.BRepOffsetAPI import (
+    BRepOffsetAPI_MakeThickSolid,
+    BRepOffsetAPI_MakePipe,
+    BRepOffsetAPI_ThruSections,
+)
 from OCP.collections import List_TopoDS_Shape
 from OCP.BRepBndLib import BRepBndLib
 from OCP.Bnd import Bnd_Box
@@ -41,7 +45,7 @@ from OCP.TopAbs import (
     TopAbs_SOLID,
     TopAbs_SHELL,
 )
-from OCP.TopoDS import TopoDS, TopoDS_Shape, TopoDS_Solid, TopoDS_Face, TopoDS_Edge
+from OCP.TopoDS import TopoDS, TopoDS_Shape, TopoDS_Solid, TopoDS_Face, TopoDS_Edge, TopoDS_Wire
 
 
 class SolidOperations:
@@ -403,4 +407,46 @@ class SolidOperations:
             cutter = SolidOperations.make_box(span_x, span_y, span_z,
                                               xmin - 5.0, ymin - 5.0, offset)
         return SolidOperations.boolean_cut(shape, cutter)
+
+    @staticmethod
+    def transform_shape(shape: TopoDS_Shape, dx: float = 0.0, dy: float = 0.0, dz: float = 0.0,
+                        rx: float = 0.0, ry: float = 0.0, rz: float = 0.0) -> TopoDS_Shape:
+        """Translates and rotates solid shape in 3D space."""
+        trsf = gp_Trsf()
+        trsf.SetTranslation(gp_Vec(float(dx), float(dy), float(dz)))
+        if abs(rx) > 1e-4:
+            t_rx = gp_Trsf()
+            t_rx.SetRotation(gp_Ax1(gp_Pnt(0, 0, 0), gp_Dir(1, 0, 0)), math.radians(rx))
+            trsf.Multiply(t_rx)
+        if abs(ry) > 1e-4:
+            t_ry = gp_Trsf()
+            t_ry.SetRotation(gp_Ax1(gp_Pnt(0, 0, 0), gp_Dir(0, 1, 0)), math.radians(ry))
+            trsf.Multiply(t_ry)
+        if abs(rz) > 1e-4:
+            t_rz = gp_Trsf()
+            t_rz.SetRotation(gp_Ax1(gp_Pnt(0, 0, 0), gp_Dir(0, 0, 1)), math.radians(rz))
+            trsf.Multiply(t_rz)
+        return BRepBuilderAPI_Transform(shape, trsf, True).Shape()
+
+    @staticmethod
+    def sweep_face_along_wire(face: TopoDS_Face, spine_wire: TopoDS_Wire) -> TopoDS_Shape:
+        """Sweeps a planar face profile along a 3D path wire."""
+        pipe = BRepOffsetAPI_MakePipe(spine_wire, face)
+        pipe.Build()
+        if not pipe.IsDone():
+            raise RuntimeError("Sweep operation failed")
+        return pipe.Shape()
+
+    @staticmethod
+    def loft_wires(wires: List[TopoDS_Wire], is_solid: bool = True, is_ruled: bool = False) -> TopoDS_Shape:
+        """Lofts between sequential wire profiles."""
+        if len(wires) < 2:
+            raise ValueError("Loft requires at least two profile wires")
+        loft = BRepOffsetAPI_ThruSections(is_solid, is_ruled)
+        for w in wires:
+            loft.AddWire(w)
+        loft.Build()
+        if not loft.IsDone():
+            raise RuntimeError("Loft operation failed")
+        return loft.Shape()
 

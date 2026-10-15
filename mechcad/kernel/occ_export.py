@@ -92,3 +92,45 @@ class CADExchange:
                 msp.add_arc((c[0], c[1]), r, a1, a2)
         doc.saveas(filepath)
         return os.path.exists(filepath) and os.path.getsize(filepath) > 0
+
+    @staticmethod
+    def import_stl(filepath: str) -> TopoDS_Shape:
+        """Reads an STL mesh file and returns the TopoDS_Shape."""
+        if not os.path.exists(filepath):
+            raise FileNotFoundError(f"STL file not found: {filepath}")
+        reader = StlAPI_Reader()
+        shape = TopoDS_Shape()
+        success = reader.Read(shape, filepath)
+        if not success or shape.IsNull():
+            raise RuntimeError("Failed to read STL mesh file")
+        return shape
+
+    @staticmethod
+    def import_dxf(filepath: str) -> list:
+        """Reads 2D entities from DXF file and returns list of element descriptors."""
+        if not os.path.exists(filepath):
+            raise FileNotFoundError(f"DXF file not found: {filepath}")
+        doc = ezdxf.readfile(filepath)
+        msp = doc.modelspace()
+        elements = []
+        for entity in msp:
+            dxftype = entity.dxftype()
+            if dxftype == "LINE":
+                s = entity.dxf.start
+                e = entity.dxf.end
+                elements.append({"type": "line", "p1": (float(s.x), float(s.y)), "p2": (float(e.x), float(e.y))})
+            elif dxftype == "CIRCLE":
+                c = entity.dxf.center
+                r = entity.dxf.radius
+                elements.append({"type": "circle", "center": (float(c.x), float(c.y)), "radius": float(r)})
+            elif dxftype == "ARC":
+                c = entity.dxf.center
+                r = entity.dxf.radius
+                elements.append({
+                    "type": "arc",
+                    "center": (float(c.x), float(c.y)),
+                    "radius": float(r),
+                    "start_angle": float(entity.dxf.start_angle),
+                    "end_angle": float(entity.dxf.end_angle),
+                })
+        return elements

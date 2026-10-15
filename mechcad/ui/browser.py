@@ -199,6 +199,22 @@ class ModelBrowser(QWidget):
             is_vis = self._visibility_state.get(("sketch", sid), True)
             self._set_eye(sk_sub, "sketch", sid, is_vis)
 
+        # 7. Construction Planes Folder
+        if hasattr(doc, "construction_planes") and doc.construction_planes:
+            const_item = QTreeWidgetItem(root_item)
+            const_item.setIcon(0, CADIcons.get("construct_plane", 16))
+            const_item.setText(0, "Construction")
+            const_item.setExpanded(True)
+            self._set_eye(const_item, "construction", "root", True)
+            for pid, cp in doc.construction_planes.items():
+                cp_sub = QTreeWidgetItem(const_item)
+                cp_sub.setIcon(0, CADIcons.get("plane", 14))
+                cp_sub.setText(0, cp["name"])
+                cp_sub.setData(0, Qt.UserRole, ("construction", pid))
+                cp_sub.setForeground(0, QBrush(QColor("#f5a623")))
+                is_vis = self._visibility_state.get(("construction", pid), cp.get("is_visible", True))
+                self._set_eye(cp_sub, "construction", pid, is_vis)
+
     def _set_eye(self, item: QTreeWidgetItem, item_type: str, item_id: str, is_visible: bool):
         icon_name = "eye_on" if is_visible else "eye_off"
         item.setIcon(1, CADIcons.get(icon_name, 14))
@@ -269,6 +285,13 @@ class ModelBrowser(QWidget):
         elif item_type == "body":
             act_del = menu.addAction("Delete Body")
             act_del.triggered.connect(lambda: self.delete_item_requested.emit("body", item_id))
+        elif item_type == "construction":
+            act_sketch = menu.addAction("Create Sketch on this Plane")
+            act_sketch.setIcon(CADIcons.get("create_sketch", 16))
+            act_sketch.triggered.connect(lambda: self.create_sketch_requested.emit(item_id))
+            menu.addSeparator()
+            act_del = menu.addAction("Delete Construction Plane")
+            act_del.triggered.connect(lambda: self.delete_item_requested.emit("construction", item_id))
         elif item_type == "named_view":
             act_apply = menu.addAction("Orient to View")
             act_apply.triggered.connect(lambda: self.item_selected.emit("named_view", item_id))

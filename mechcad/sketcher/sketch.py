@@ -23,10 +23,11 @@ from mechcad.sketcher.solver import SketchSolver, SolverResult
 class Sketch:
     """Parametric 2D sketch bound to a reference plane."""
 
-    def __init__(self, sketch_id: str, name: str = "Sketch", plane: str = "XY"):
+    def __init__(self, sketch_id: str, name: str = "Sketch", plane: str = "XY", offset: float = 0.0):
         self.sketch_id = sketch_id
         self.name = name
         self.plane = plane.upper()  # 'XY', 'XZ', 'YZ'
+        self.offset = float(offset)
 
         self.points: Dict[str, Point2D] = {}
         self.lines: Dict[str, Line2D] = {}
@@ -38,16 +39,17 @@ class Sketch:
         self._elem_counter = 0
         self.last_result: Optional[SolverResult] = None
 
-    def map_to_3d(self, u: float, v: float, offset: float = 0.0) -> gp_Pnt:
+    def map_to_3d(self, u: float, v: float, offset: Optional[float] = None) -> gp_Pnt:
         """Transforms 2D plane coordinates (u, v) to 3D world space (x, y, z)."""
+        eff_offset = self.offset if offset is None else float(offset)
         if self.plane == "XY":
-            return gp_Pnt(u, v, offset)
+            return gp_Pnt(u, v, eff_offset)
         elif self.plane == "XZ":
-            return gp_Pnt(u, offset, v)
+            return gp_Pnt(u, eff_offset, v)
         elif self.plane == "YZ":
-            return gp_Pnt(offset, u, v)
+            return gp_Pnt(eff_offset, u, v)
         else:
-            return gp_Pnt(u, v, offset)
+            return gp_Pnt(u, v, eff_offset)
 
     def get_plane_normal(self) -> Tuple[float, float, float]:
         """Returns the normal vector of the sketch plane."""
@@ -105,6 +107,18 @@ class Sketch:
         cid = f"circle{self._elem_counter}"
         self.circles[cid] = Circle2D(cid, center_id, radius)
         return cid
+
+    def add_arc(self, cu: float, cv: float, start_u: float, start_v: float, end_u: float, end_v: float) -> str:
+        center_id = self.add_point(cu, cv, is_construction=True)
+        start_id = self.add_point(start_u, start_v)
+        end_id = self.add_point(end_u, end_v)
+        dx = start_u - cu
+        dy = start_v - cv
+        radius = math.hypot(dx, dy)
+        self._elem_counter += 1
+        aid = f"arc{self._elem_counter}"
+        self.arcs[aid] = Arc2D(aid, center_id, start_id, end_id, radius)
+        return aid
 
     def add_constraint(self, kind: str, entities: List[str], value: Optional[float] = None) -> str:
         cid = f"c{len(self.constraints) + 1}"
@@ -245,15 +259,17 @@ class Sketch:
             "id": self.sketch_id,
             "name": self.name,
             "plane": self.plane,
+            "offset": self.offset,
             "points": {pid: pt.to_dict() for pid, pt in self.points.items()},
             "lines": {lid: l.to_dict() for lid, l in self.lines.items()},
             "circles": {cid: c.to_dict() for cid, c in self.circles.items()},
+            "arcs": {aid: a.to_dict() for aid, a in self.arcs.items()},
             "constraints": [c.to_dict() for c in self.constraints],
         }
 
     @classmethod
     def from_dict(cls, data: Dict[str, Any]) -> "Sketch":
-        sk = cls(data["id"], data.get("name", "Sketch"), data.get("plane", "XY"))
+        sk = cls(data["id"], data.get("name", "Sketch"), data.get("plane", "XY"), offset=data.get("offset", 0.0))
         for pid, pdata in data.get("points", {}).items():
             sk.points[pid] = Point2D(
                 pdata["id"], pdata["u"], pdata["v"],
@@ -269,6 +285,11 @@ class Sketch:
             sk.circles[cid] = Circle2D(
                 cdata["id"], cdata["center"], cdata["radius"],
                 is_construction=cdata.get("is_construction", False)
+            )
+        for aid, adata in data.get("arcs", {}).items():
+            sk.arcs[aid] = Arc2D(
+                adata["id"], adata["center"], adata["start"], adata["end"], adata["radius"],
+                is_construction=adata.get("is_construction", False)
             )
         for cdata in data.get("constraints", []):
             sk.constraints.append(Constraint.from_dict(cdata))

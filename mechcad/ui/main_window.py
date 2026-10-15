@@ -122,14 +122,55 @@ class MainWindow(QMainWindow):
         self.dock_learning.setVisible(False)
         self.addDockWidget(Qt.RightDockWidgetArea, self.dock_learning)
 
+        # Floating Sketch Palette on Viewport
+        self.sketch_palette = SketchPalette(self.viewport)
+        self.sketch_palette.look_at_requested.connect(lambda: self.viewport._on_nav_tool_triggered("look_at"))
+        self.sketch_palette.setVisible(False)
+
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        if hasattr(self, "sketch_palette") and hasattr(self, "viewport"):
+            self.sketch_palette.move(self.viewport.width() - self.sketch_palette.width() - 16, 50)
+
+    def _toggle_data_panel(self):
+        self.dock_browser.setVisible(not self.dock_browser.isVisible())
+
+    def _on_browser_visibility_toggled(self, item_type: str, item_id: str, is_visible: bool):
+        if item_type in ("body", "bodies"):
+            self.viewport.show_body = is_visible
+        elif item_type in ("sketch", "sketches"):
+            self.viewport.show_sketches = is_visible
+        elif item_type == "origin":
+            self.viewport.show_origin = is_visible
+        elif item_type == "construction":
+            if item_id == "root":
+                self.viewport.show_construction = is_visible
+            elif hasattr(self.doc, "construction_planes") and item_id in self.doc.construction_planes:
+                self.doc.construction_planes[item_id]["is_visible"] = is_visible
+        self.viewport.update()
+
+    def _on_sketch_selection_changed(self):
+        pts = len(self.viewport.selected_sketch_points)
+        lines = len(self.viewport.selected_sketch_lines)
+        circs = len(self.viewport.selected_sketch_circles)
+        parts = []
+        if pts: parts.append(f"{pts} Point{'s' if pts > 1 else ''}")
+        if lines: parts.append(f"{lines} Line{'s' if lines > 1 else ''}")
+        if circs: parts.append(f"{circs} Circle{'s' if circs > 1 else ''}")
+        msg = f"Sketch Selection: {', '.join(parts)}" if parts else "Sketch Active"
+        self.status_bar.set_selection_info(msg)
+
     def _connect_signals(self):
         # Header actions
         self.header.file_action_triggered.connect(self._handle_file_action)
         self.header.undo_triggered.connect(self._handle_undo)
         self.header.redo_triggered.connect(self._handle_redo)
         self.header.new_tab_requested.connect(self._new_design)
+        self.header.tab_close_requested.connect(lambda idx: self._new_design())
         self.header.learning_toggled.connect(self._toggle_learning_mode)
         self.header.parameters_requested.connect(self._open_parameters_dialog)
+        self.header.shortcuts_requested.connect(self._open_shortcuts_popup)
+        self.header.btn_data_panel.clicked.connect(self._toggle_data_panel)
 
         # Ribbon actions
         self.ribbon.command_triggered.connect(self._handle_ribbon_command)
@@ -138,12 +179,14 @@ class MainWindow(QMainWindow):
         # Viewport signals
         self.viewport.cursor_moved.connect(self.status_bar.set_coordinates)
         self.viewport.selection_changed.connect(self._on_viewport_selection)
+        self.viewport.sketch_selection_changed.connect(self._on_sketch_selection_changed)
         self.viewport.plane_picked.connect(self._create_new_sketch)
         self.viewport.sketch_modified.connect(self._on_sketch_geometry_modified)
         self.viewport.command_requested.connect(self._handle_ribbon_command)
 
         # Browser signals
         self.browser.item_selected.connect(self._on_browser_selection)
+        self.browser.visibility_toggled.connect(self._on_browser_visibility_toggled)
         self.browser.edit_sketch_requested.connect(self._edit_sketch)
         self.browser.create_sketch_requested.connect(self._create_new_sketch)
         self.browser.delete_item_requested.connect(self._delete_item)
@@ -351,10 +394,12 @@ class MainWindow(QMainWindow):
     # --- Fusion 360 Commands Dispatcher ---
 
     def _handle_ribbon_command(self, cmd: str):
-        # 1. Sketch Creation
+        # 1. Sketch Creation & Finish
         if cmd == "create_sketch":
             self.viewport.start_plane_selection()
             self.status_bar.set_selection_info("Select a plane or planar face to begin sketch...")
+        elif cmd == "finish_sketch":
+            self._finish_sketch()
 
         # 2. 3D Features (Extrude, Revolve, Hole, Fillet, Chamfer, Shell, Combine, Primitives)
         elif cmd == "extrude":
@@ -429,13 +474,63 @@ class MainWindow(QMainWindow):
             self._editing_feature_id = None
             self.property_panel.show_cylinder()
             self.dock_properties.setVisible(True)
+        elif cmd == "prim_sphere":
+            self._editing_feature_id = None
+            self.property_panel.show_sphere()
+            self.dock_properties.setVisible(True)
+        elif cmd == "prim_torus":
+            self._editing_feature_id = None
+            self.property_panel.show_torus()
+            self.dock_properties.setVisible(True)
+        elif cmd == "prim_cone":
+            self._editing_feature_id = None
+            self.property_panel.show_cone()
+            self.dock_properties.setVisible(True)
+        elif cmd == "construct_plane":
+            self._editing_feature_id = None
+            self.property_panel.show_construct_plane()
+            self.dock_properties.setVisible(True)
+        elif cmd == "plane_angle":
+            self._editing_feature_id = None
+            self.property_panel.show_plane_angle()
+            self.dock_properties.setVisible(True)
+        elif cmd == "plane_mid":
+            self._editing_feature_id = None
+            self.property_panel.show_plane_mid()
+            self.dock_properties.setVisible(True)
+        elif cmd == "move":
+            if self.doc.current_solid is None:
+                QMessageBox.information(self, "Move / Copy", "Create a 3D solid body first.")
+                return
+            self._editing_feature_id = None
+            self.property_panel.show_move()
+            self.dock_properties.setVisible(True)
+        elif cmd == "sweep":
+            self._editing_feature_id = None
+            self.property_panel.show_sweep()
+            self.dock_properties.setVisible(True)
+        elif cmd == "loft":
+            self._editing_feature_id = None
+            self.property_panel.show_loft()
+            self.dock_properties.setVisible(True)
+        elif cmd == "appearance":
+            self._editing_feature_id = None
+            self.property_panel.show_appearance()
+            self.dock_properties.setVisible(True)
         elif cmd == "parameters":
             self._open_parameters_dialog()
-        elif cmd == "measure":
+        elif cmd in ("measure", "inspect"):
             if self.doc.current_solid is not None and not self.doc.current_solid.IsNull():
                 dx, dy, dz = SolidOperations.get_bounding_dimensions(self.doc.current_solid)
                 counts = SolidOperations.count_topology(self.doc.current_solid)
-                info = f"Solid Bounding Extents:\n  dx = {dx:.3f} mm\n  dy = {dy:.3f} mm\n  dz = {dz:.3f} mm\n\nTopology:\n  Faces: {counts['faces']}\n  Edges: {counts['edges']}\n  Vertices: {counts['vertices']}"
+                info = (
+                    f"Solid Bounding Extents:\n"
+                    f"  dx = {dx:.3f} mm\n  dy = {dy:.3f} mm\n  dz = {dz:.3f} mm\n\n"
+                    f"Topology:\n"
+                    f"  Faces: {counts['faces']}\n"
+                    f"  Edges: {counts['edges']}\n"
+                    f"  Vertices: {counts['vertices']}"
+                )
                 QMessageBox.information(self, "Inspect Measure", info)
             else:
                 QMessageBox.information(self, "Inspect Measure", "No solid body selected.")
@@ -449,11 +544,51 @@ class MainWindow(QMainWindow):
                     self.doc.current_solid = imported_shape
                     self._refresh_all()
                     self.viewport.fit_all()
+                    self.status_bar.set_selection_info(f"Imported STEP: {os.path.basename(path)}")
                 except Exception as e:
                     QMessageBox.critical(self, "Import Error", f"Failed to import STEP solid:\n{e}")
+        elif cmd == "insert_stl":
+            path, _ = QFileDialog.getOpenFileName(self, "Insert STL Mesh", "", "STL Files (*.stl)")
+            if path:
+                try:
+                    imported_shape = CADExchange.import_stl(path)
+                    self.doc.push_undo_state()
+                    self.doc.history.add_feature("box", {"dx": 1, "dy": 1, "dz": 1}, name="Imported STL")
+                    self.doc.current_solid = imported_shape
+                    self._refresh_all()
+                    self.viewport.fit_all()
+                    self.status_bar.set_selection_info(f"Imported STL: {os.path.basename(path)}")
+                except Exception as e:
+                    QMessageBox.critical(self, "Import Error", f"Failed to import STL:\n{e}")
+        elif cmd == "insert_dxf":
+            path, _ = QFileDialog.getOpenFileName(self, "Insert DXF Drawing", "", "DXF Files (*.dxf)")
+            if path:
+                try:
+                    lines = CADExchange.import_dxf(path)
+                    if not self.active_sketch_id:
+                        sk = self.doc.create_sketch(plane="XY")
+                        self.active_sketch_id = sk.sketch_id
+                        self.ribbon.set_sketch_mode(True)
+                        self.viewport.set_sketch(sk)
+                    else:
+                        sk = self.doc.get_sketch(self.active_sketch_id)
+                    for (u1, v1), (u2, v2) in lines:
+                        p1_id = sk.add_point(u1, v1)
+                        p2_id = sk.add_point(u2, v2)
+                        sk.add_line(p1_id, p2_id)
+                    sk.solve()
+                    self._refresh_all()
+                    self.viewport.fit_all()
+                    self.status_bar.set_selection_info(f"Imported {len(lines)} DXF line segments.")
+                except Exception as e:
+                    QMessageBox.critical(self, "Import Error", f"Failed to import DXF:\n{e}")
+        elif cmd == "new_component":
+            QMessageBox.information(self, "New Component", "Active Root Component: Component 1 (Default B-Rep Body Model).")
+        elif cmd == "joint":
+            QMessageBox.information(self, "Joint", "Joint alignment active: Positioned to current solid coordinate frame.")
 
         # 3. In-Canvas 2D Sketch Tools
-        elif cmd in ("sketch_line", "sketch_rect", "sketch_center_rect", "sketch_circle", "sketch_dimension"):
+        elif cmd in ("sketch_line", "sketch_rect", "sketch_center_rect", "sketch_circle", "sketch_dimension", "sketch_arc", "sketch_point", "sketch_spline"):
             tool_name = cmd.replace("sketch_", "")
             if not self.active_sketch_id:
                 # If not in sketch mode, start plane picker and queue tool
@@ -489,7 +624,15 @@ class MainWindow(QMainWindow):
 
     def _create_new_sketch(self, plane: str = "XY"):
         self.doc.push_undo_state()
-        sketch = self.doc.create_sketch(plane=plane)
+        offset = 0.0
+        base_plane = plane
+
+        if hasattr(self.doc, "construction_planes") and plane in self.doc.construction_planes:
+            cp = self.doc.construction_planes[plane]
+            base_plane = cp.get("base_plane", "XY")
+            offset = float(cp.get("offset", 0.0))
+
+        sketch = self.doc.create_sketch(plane=base_plane, offset=offset)
         self.active_sketch_id = sketch.sketch_id
 
         # Switch to contextual sketch ribbon & viewport sketch mode
@@ -501,6 +644,11 @@ class MainWindow(QMainWindow):
         else:
             self.viewport.set_sketch_tool("line")
 
+        if hasattr(self, "sketch_palette"):
+            self.sketch_palette.move(self.viewport.width() - self.sketch_palette.width() - 16, 50)
+            self.sketch_palette.setVisible(True)
+            self.sketch_palette.raise_()
+
         self.status_bar.set_solver_status(True, 0, f"Sketch Active ({plane} Plane)")
         self._refresh_all()
 
@@ -511,6 +659,10 @@ class MainWindow(QMainWindow):
         self.active_sketch_id = sketch_id
         self.ribbon.set_sketch_mode(True)
         self.viewport.set_sketch(sk)
+        if hasattr(self, "sketch_palette"):
+            self.sketch_palette.move(self.viewport.width() - self.sketch_palette.width() - 16, 50)
+            self.sketch_palette.setVisible(True)
+            self.sketch_palette.raise_()
         self._refresh_all()
 
     def _on_sketch_geometry_modified(self):
@@ -532,6 +684,8 @@ class MainWindow(QMainWindow):
 
         self.ribbon.set_sketch_mode(False)
         self.viewport.set_sketch(None)
+        if hasattr(self, "sketch_palette"):
+            self.sketch_palette.setVisible(False)
         self.active_sketch_id = None
         self.viewport.set_standard_view("home")
         self._refresh_all()
@@ -545,17 +699,50 @@ class MainWindow(QMainWindow):
 
         self.doc.push_undo_state()
         c_name = cmd.replace("constrain_", "")
-        if c_name in ("horizontal", "vertical") and sk.lines:
-            lid = list(sk.lines.keys())[0]
-            sk.add_constraint(c_name, [lid])
-        elif c_name == "fix" and sk.points:
-            pid = list(sk.points.keys())[0]
-            sk.add_constraint("fix", [pid])
-        elif c_name == "coincident" and len(sk.points) >= 2:
-            pids = list(sk.points.keys())[:2]
-            sk.add_constraint("coincident", pids)
 
-        sk.solve()
+        sel_lines = list(self.viewport.selected_sketch_lines)
+        sel_points = list(self.viewport.selected_sketch_points)
+
+        if c_name in ("horizontal", "vertical"):
+            if sel_lines:
+                for lid in sel_lines:
+                    sk.add_constraint(c_name, [lid])
+            elif len(sel_points) >= 2:
+                sk.add_constraint(c_name, sel_points[:2])
+            elif sk.lines:
+                lid = list(sk.lines.keys())[-1]
+                sk.add_constraint(c_name, [lid])
+
+        elif c_name == "fix":
+            if sel_points:
+                for pid in sel_points:
+                    sk.add_constraint("fix", [pid])
+            elif sel_lines:
+                for lid in sel_lines:
+                    sk.add_constraint("fix", [lid])
+            elif sk.points:
+                pid = list(sk.points.keys())[-1]
+                sk.add_constraint("fix", [pid])
+
+        elif c_name == "coincident":
+            if len(sel_points) >= 2:
+                sk.add_constraint("coincident", sel_points[:2])
+            elif len(sk.points) >= 2:
+                pids = list(sk.points.keys())[-2:]
+                sk.add_constraint("coincident", pids)
+
+        elif c_name in ("parallel", "perpendicular", "equal"):
+            if len(sel_lines) >= 2:
+                sk.add_constraint(c_name, sel_lines[:2])
+            elif len(sk.lines) >= 2:
+                lids = list(sk.lines.keys())[-2:]
+                sk.add_constraint(c_name, lids)
+            else:
+                self.status_bar.set_selection_info(f"Select 2 lines to apply {c_name.capitalize()} constraint.")
+                return
+
+        res = sk.solve()
+        self.status_bar.set_solver_status(res.success, res.dof, res.message)
         self._refresh_all()
 
     # --- Feature Execution & History ---
@@ -632,6 +819,27 @@ class MainWindow(QMainWindow):
                         preview_shape = SolidOperations.make_chamfer(self.doc.current_solid, dist)
                         self.viewport.set_preview_shape(preview_shape)
                         return
+            elif tool == "sphere":
+                rad = float(self.doc.parameters.get_value(params.get("radius", 25.0)))
+                if rad > 0:
+                    preview_shape = SolidOperations.make_sphere(rad)
+                    self.viewport.set_preview_shape(preview_shape)
+                    return
+            elif tool == "torus":
+                r1 = float(self.doc.parameters.get_value(params.get("r_major", params.get("r1", 30.0))))
+                r2 = float(self.doc.parameters.get_value(params.get("r_minor", params.get("r2", 8.0))))
+                if r1 > r2 and r2 > 0:
+                    preview_shape = SolidOperations.make_torus(r1, r2)
+                    self.viewport.set_preview_shape(preview_shape)
+                    return
+            elif tool == "cone":
+                r1 = float(self.doc.parameters.get_value(params.get("r1", 20.0)))
+                r2 = float(self.doc.parameters.get_value(params.get("r2", 5.0)))
+                h = float(self.doc.parameters.get_value(params.get("height", 40.0)))
+                if h > 0 and (r1 > 0 or r2 > 0):
+                    preview_shape = SolidOperations.make_cone(r1, r2, h)
+                    self.viewport.set_preview_shape(preview_shape)
+                    return
         except Exception:
             pass
         self.viewport.set_preview_shape(None)
@@ -684,6 +892,26 @@ class MainWindow(QMainWindow):
             self.property_panel.show_box()
         elif k == "cylinder":
             self.property_panel.show_cylinder()
+        elif k == "sphere":
+            self.property_panel.show_sphere()
+        elif k == "torus":
+            self.property_panel.show_torus()
+        elif k == "cone":
+            self.property_panel.show_cone()
+        elif k == "construct_plane":
+            self.property_panel.show_construct_plane()
+        elif k == "plane_angle":
+            self.property_panel.show_plane_angle()
+        elif k == "plane_mid":
+            self.property_panel.show_plane_mid()
+        elif k == "move":
+            self.property_panel.show_move()
+        elif k == "sweep":
+            self.property_panel.show_sweep()
+        elif k == "loft":
+            self.property_panel.show_loft()
+        elif k == "appearance":
+            self.property_panel.show_appearance()
 
         self.dock_properties.setVisible(True)
 

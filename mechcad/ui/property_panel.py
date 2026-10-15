@@ -454,6 +454,204 @@ class PropertyPanel(QWidget):
         self.setVisible(True)
         self._emit_preview_delayed()
 
+    def show_sphere(self):
+        self.current_tool = "sphere"
+        self.lbl_title.setText("SPHERE")
+        self._clear_content()
+
+        self.content_layout.addWidget(self._create_row_label("Radius (mm):"))
+        self.txt_sph_r = self._create_expr_input("15.0 mm")
+        self.content_layout.addWidget(self.txt_sph_r)
+
+        self.content_layout.addWidget(self._create_row_label("Operation:"))
+        self.combo_sph_op = self._create_combo(["New Body", "Join", "Cut", "Intersect"])
+        self.content_layout.addWidget(self.combo_sph_op)
+
+        self.extra_data = {}
+        self.setVisible(True)
+        self._emit_preview_delayed()
+
+    def show_torus(self):
+        self.current_tool = "torus"
+        self.lbl_title.setText("TORUS")
+        self._clear_content()
+
+        self.content_layout.addWidget(self._create_row_label("Major Radius (mm):"))
+        self.txt_torus_r1 = self._create_expr_input("20.0 mm")
+        self.content_layout.addWidget(self.txt_torus_r1)
+
+        self.content_layout.addWidget(self._create_row_label("Minor Radius (mm):"))
+        self.txt_torus_r2 = self._create_expr_input("5.0 mm")
+        self.content_layout.addWidget(self.txt_torus_r2)
+
+        self.content_layout.addWidget(self._create_row_label("Operation:"))
+        self.combo_torus_op = self._create_combo(["New Body", "Join", "Cut", "Intersect"])
+        self.content_layout.addWidget(self.combo_torus_op)
+
+        self.extra_data = {}
+        self.setVisible(True)
+        self._emit_preview_delayed()
+
+    def show_cone(self):
+        self.current_tool = "cone"
+        self.lbl_title.setText("CONE")
+        self._clear_content()
+
+        self.content_layout.addWidget(self._create_row_label("Base Radius / r1 (mm):"))
+        self.txt_cone_r1 = self._create_expr_input("15.0 mm")
+        self.content_layout.addWidget(self.txt_cone_r1)
+
+        self.content_layout.addWidget(self._create_row_label("Top Radius / r2 (mm):"))
+        self.txt_cone_r2 = self._create_expr_input("5.0 mm")
+        self.content_layout.addWidget(self.txt_cone_r2)
+
+        self.content_layout.addWidget(self._create_row_label("Height (mm):"))
+        self.txt_cone_h = self._create_expr_input("30.0 mm")
+        self.content_layout.addWidget(self.txt_cone_h)
+
+        self.content_layout.addWidget(self._create_row_label("Operation:"))
+        self.combo_cone_op = self._create_combo(["New Body", "Join", "Cut", "Intersect"])
+        self.content_layout.addWidget(self.combo_cone_op)
+
+        self.extra_data = {}
+        self.setVisible(True)
+        self._emit_preview_delayed()
+
+    def show_construct_plane(self):
+        self.current_tool = "construct_plane"
+        self.lbl_title.setText("OFFSET PLANE")
+        self._clear_content()
+
+        self.content_layout.addWidget(self._create_row_label("Base Plane:"))
+        self.combo_cplane_base = self._create_combo(["XY Plane", "XZ Plane", "YZ Plane"])
+        self.content_layout.addWidget(self.combo_cplane_base)
+
+        self.content_layout.addWidget(self._create_row_label("Offset Distance (mm):"))
+        self.txt_cplane_dist = self._create_expr_input("25.0 mm")
+        self.content_layout.addWidget(self.txt_cplane_dist)
+
+        self.extra_data = {"type": "offset"}
+        self.setVisible(True)
+
+    def show_plane_angle(self):
+        self.current_tool = "plane_angle"
+        self.lbl_title.setText("PLANE AT ANGLE")
+        self._clear_content()
+
+        self.content_layout.addWidget(self._create_row_label("Reference Plane:"))
+        self.combo_pangle_base = self._create_combo(["XY Plane", "XZ Plane", "YZ Plane"])
+        self.content_layout.addWidget(self.combo_pangle_base)
+
+        self.content_layout.addWidget(self._create_row_label("Angle (deg):"))
+        self.txt_pangle_val = self._create_expr_input("45.0 deg")
+        self.content_layout.addWidget(self.txt_pangle_val)
+
+        self.extra_data = {"type": "angle"}
+        self.setVisible(True)
+
+    def show_plane_mid(self):
+        self.current_tool = "plane_mid"
+        self.lbl_title.setText("MIDPLANE")
+        self._clear_content()
+
+        self.content_layout.addWidget(self._create_row_label("Plane 1:"))
+        self.combo_pmid_1 = self._create_combo(["XY Plane", "XZ Plane", "YZ Plane"])
+        self.content_layout.addWidget(self.combo_pmid_1)
+
+        self.content_layout.addWidget(self._create_row_label("Plane 2 (Offset):"))
+        self.txt_pmid_dist = self._create_expr_input("50.0 mm")
+        self.content_layout.addWidget(self.txt_pmid_dist)
+
+        self.extra_data = {"type": "midplane"}
+        self.setVisible(True)
+
+    def show_move(self):
+        self.current_tool = "move"
+        self.lbl_title.setText("MOVE / COPY")
+        self._clear_content()
+
+        self.content_layout.addWidget(self._create_row_label("Translate X / dx (mm):"))
+        self.txt_move_dx = self._create_expr_input("0.0 mm")
+        self.content_layout.addWidget(self.txt_move_dx)
+
+        self.content_layout.addWidget(self._create_row_label("Translate Y / dy (mm):"))
+        self.txt_move_dy = self._create_expr_input("0.0 mm")
+        self.content_layout.addWidget(self.txt_move_dy)
+
+        self.content_layout.addWidget(self._create_row_label("Translate Z / dz (mm):"))
+        self.txt_move_dz = self._create_expr_input("0.0 mm")
+        self.content_layout.addWidget(self.txt_move_dz)
+
+        self.content_layout.addWidget(self._create_row_label("Rotate Z (deg):"))
+        self.txt_move_rz = self._create_expr_input("0.0 deg")
+        self.content_layout.addWidget(self.txt_move_rz)
+
+        self.extra_data = {}
+        self.setVisible(True)
+
+    def show_sweep(self):
+        self.current_tool = "sweep"
+        self.lbl_title.setText("SWEEP")
+        self._clear_content()
+
+        self.content_layout.addWidget(self._create_row_label("Profile Sketch:"))
+        self.combo_sweep_prof = self._create_combo(["Active Sketch", "Sketch 1", "Sketch 2"])
+        self.content_layout.addWidget(self.combo_sweep_prof)
+
+        self.content_layout.addWidget(self._create_row_label("Path Sketch (Spine):"))
+        self.combo_sweep_path = self._create_combo(["Sketch 2", "Sketch 1", "Active Sketch"])
+        self.content_layout.addWidget(self.combo_sweep_path)
+
+        self.content_layout.addWidget(self._create_row_label("Operation:"))
+        self.combo_sweep_op = self._create_combo(["New Body", "Join", "Cut"])
+        self.content_layout.addWidget(self.combo_sweep_op)
+
+        self.extra_data = {}
+        self.setVisible(True)
+
+    def show_loft(self):
+        self.current_tool = "loft"
+        self.lbl_title.setText("LOFT")
+        self._clear_content()
+
+        lbl_desc = QLabel("Select 2 or more closed profiles to transition smoothly.")
+        lbl_desc.setStyleSheet("color: #40a9ff; font-size: 10px; padding-bottom: 4px;")
+        self.content_layout.addWidget(lbl_desc)
+
+        self.content_layout.addWidget(self._create_row_label("Profile 1:"))
+        self.combo_loft_1 = self._create_combo(["Sketch 1", "Sketch 2", "Active Sketch"])
+        self.content_layout.addWidget(self.combo_loft_1)
+
+        self.content_layout.addWidget(self._create_row_label("Profile 2:"))
+        self.combo_loft_2 = self._create_combo(["Sketch 2", "Sketch 1", "Active Sketch"])
+        self.content_layout.addWidget(self.combo_loft_2)
+
+        self.content_layout.addWidget(self._create_row_label("Operation:"))
+        self.combo_loft_op = self._create_combo(["New Body", "Join", "Cut"])
+        self.content_layout.addWidget(self.combo_loft_op)
+
+        self.extra_data = {}
+        self.setVisible(True)
+
+    def show_appearance(self):
+        self.current_tool = "appearance"
+        self.lbl_title.setText("APPEARANCE / MATERIAL")
+        self._clear_content()
+
+        self.content_layout.addWidget(self._create_row_label("Material Preset:"))
+        self.combo_mat = self._create_combo([
+            "Steel - Polished (#E0E6ED)",
+            "Aluminum - Anodized Blue (#0082C8)",
+            "Brass - Brushed (#D4AF37)",
+            "Copper - Matte (#B87333)",
+            "Carbon Fiber - Dark (#22252A)",
+            "Polymer - Safety Orange (#FF6600)",
+        ])
+        self.content_layout.addWidget(self.combo_mat)
+
+        self.extra_data = {}
+        self.setVisible(True)
+
     # --- Actions ---
 
     def _get_current_params(self) -> dict:
@@ -512,6 +710,40 @@ class PropertyPanel(QWidget):
             elif self.current_tool == "cylinder":
                 params["radius"] = self.txt_cyl_r.text().strip()
                 params["height"] = self.txt_cyl_h.text().strip()
+            elif self.current_tool == "sphere":
+                params["radius"] = self.txt_sph_r.text().strip()
+                params["operation"] = self.combo_sph_op.currentText().lower().replace(" ", "_")
+            elif self.current_tool == "torus":
+                params["r_major"] = self.txt_torus_r1.text().strip()
+                params["r_minor"] = self.txt_torus_r2.text().strip()
+                params["operation"] = self.combo_torus_op.currentText().lower().replace(" ", "_")
+            elif self.current_tool == "cone":
+                params["r1"] = self.txt_cone_r1.text().strip()
+                params["r2"] = self.txt_cone_r2.text().strip()
+                params["height"] = self.txt_cone_h.text().strip()
+                params["operation"] = self.combo_cone_op.currentText().lower().replace(" ", "_")
+            elif self.current_tool == "construct_plane":
+                bpl = self.combo_cplane_base.currentText()
+                params["base_plane"] = "XY" if "XY" in bpl else ("XZ" if "XZ" in bpl else "YZ")
+                params["offset"] = self.txt_cplane_dist.text().strip()
+                params["type"] = "offset"
+            elif self.current_tool == "plane_angle":
+                bpl = self.combo_pangle_base.currentText()
+                params["base_plane"] = "XY" if "XY" in bpl else ("XZ" if "XZ" in bpl else "YZ")
+                params["angle"] = self.txt_pangle_val.text().strip()
+                params["type"] = "angle"
+            elif self.current_tool == "plane_mid":
+                bpl = self.combo_pmid_1.currentText()
+                params["base_plane"] = "XY" if "XY" in bpl else ("XZ" if "XZ" in bpl else "YZ")
+                params["offset"] = str(float(self.txt_pmid_dist.text().replace("mm", "").strip()) / 2.0)
+                params["type"] = "midplane"
+            elif self.current_tool == "move":
+                params["dx"] = self.txt_move_dx.text().strip()
+                params["dy"] = self.txt_move_dy.text().strip()
+                params["dz"] = self.txt_move_dz.text().strip()
+                params["rz"] = self.txt_move_rz.text().strip()
+            elif self.current_tool == "appearance":
+                params["material"] = self.combo_mat.currentText()
         except Exception:
             pass
         return params

@@ -17,7 +17,7 @@ import numpy as np
 
 from PySide6.QtOpenGLWidgets import QOpenGLWidget
 from PySide6.QtCore import Qt, Signal, QPoint, QRect, QRectF, QTimer, QElapsedTimer
-from PySide6.QtWidgets import QMenu
+from PySide6.QtWidgets import QMenu, QInputDialog
 from PySide6.QtGui import (
     QMouseEvent, QWheelEvent, QColor, QPainter, QFont, QPen, QBrush, QCursor, QKeyEvent
 )
@@ -38,7 +38,8 @@ class Viewport3D(QOpenGLWidget):
 
     cursor_moved = Signal(float, float, float)  # (x, y, z) in mm
     selection_changed = Signal(str, str)        # (type, id) e.g. ('body', 'body_1')
-    plane_picked = Signal(str)                  # 'XY', 'XZ', 'YZ'
+    sketch_selection_changed = Signal()         # Emitted when sketch point/line/circle selection changes
+    plane_picked = Signal(str)                  # 'XY', 'XZ', 'YZ' or construction plane id
     profile_selected = Signal(str)              # sketch_id
     sketch_modified = Signal()                  # Emitted after user adds sketch geometry
     extrude_dragged = Signal(float)             # Live distance in mm from in-canvas arrow
@@ -59,6 +60,13 @@ class Viewport3D(QOpenGLWidget):
         self.display_style: str = "shaded_edges"
         self.show_grid: bool = True
 
+        # Visibility toggles (synchronized with browser eye icons)
+        self.show_body: bool = True
+        self.show_sketches: bool = True
+        self.show_origin: bool = True
+        self.show_construction: bool = True
+        self.current_doc: Optional[CADDocument] = None
+
         # Navigation state
         self._last_mouse_pos = QPoint()
         self._active_nav_mode = "none"  # 'orbit', 'pan', 'zoom', 'none'
@@ -66,16 +74,24 @@ class Viewport3D(QOpenGLWidget):
 
         # Mode States
         self.plane_selection_mode: bool = False
-        self.hovered_plane: Optional[str] = None  # 'XY', 'XZ', 'YZ'
+        self.hovered_plane: Optional[str] = None  # 'XY', 'XZ', 'YZ' or 'cplane_...'
 
         # In-Canvas Sketch Drawing State
         self.is_sketch_mode: bool = False
         self.active_sketch: Optional[Sketch] = None
-        self.active_sketch_tool: str = "select"  # 'select', 'line', 'rect', 'center_rect', 'circle', 'dimension'
+        self.active_sketch_tool: str = "select"  # 'select', 'line', 'rect', 'center_rect', 'circle', 'dimension', 'point', 'arc'
         self._sketch_start_pt: Optional[Tuple[float, float]] = None
         self._sketch_current_pt: Optional[Tuple[float, float]] = None
         self._snap_pt: Optional[Tuple[float, float]] = None
         self._snap_type: str = "none"  # 'origin', 'point', 'axis_h', 'axis_v'
+
+        # Interactive sketch entity selection sets
+        self.selected_sketch_points = set()
+        self.selected_sketch_lines = set()
+        self.selected_sketch_circles = set()
+
+        # Multi-point arc drawing state
+        self._arc_pts = []
 
         # Rendered CAD geometry
         self.tessellation: Optional[ShapeTessellation] = None
@@ -197,14 +213,19 @@ class Viewport3D(QOpenGLWidget):
             self._render_grid()
 
         # 4. Trihedron at World Origin
-        self._render_trihedron()
+        if self.show_origin:
+            self._render_trihedron()
 
         # 5. Origin Plane Tiles for "Create Sketch" selection
         if self.plane_selection_mode:
             self._render_origin_plane_tiles()
 
+        # 5b. Construction Planes
+        if self.show_construction:
+            self._render_construction_planes()
+
         # 6. Render 3D CAD Solid Geometry
-        if self.tessellation and len(self.tessellation.vertices) > 0:
+        if self.show_body and self.tessellation and len(self.tessellation.vertices) > 0:
             self._render_solid()
 
         # 6b. Render Live Feature Operation Preview Solid (if active)
@@ -212,7 +233,7 @@ class Viewport3D(QOpenGLWidget):
             self._render_preview_solid()
 
         # 7. Render Sketch Geometry & Shaded Profiles (if sketch active)
-        if self.active_sketch:
+        if self.show_sketches and self.active_sketch:
             self._render_sketch(self.active_sketch)
 
         # 8. Render In-Canvas 3D Extrude Arrow Manipulator
@@ -349,6 +370,67 @@ class Viewport3D(QOpenGLWidget):
 
         glEnable(GL_LIGHTING)
 
+    def _render_construction_planes(self):
+        """Renders user-created construction datum planes with amber translucency and boundaries."""
+        if not self.current_doc or not hasattr(self.current_doc, "construction_planes"):
+            return
+        if not self.current_doc.construction_planes:
+            return
+
+        glDisable(GL_LIGHTING)
+        sz = 40.0
+
+        for pid, cp in self.current_doc.construction_planes.items():
+            if not cp.get("is_visible", True):
+                continue
+
+            base = cp.get("base_plane", "XY")
+            offset = float(cp.get("offset", 0.0))
+            is_hov = (self.hovered_plane == pid)
+
+            # Translucent amber construction quad
+            glColor4f(0.96, 0.65, 0.14, 0.35 if is_hov else 0.18)
+            glBegin(GL_QUADS)
+            if base == "XY":
+                glVertex3f(-sz, -sz, offset)
+                glVertex3f(sz, -sz, offset)
+                glVertex3f(sz, sz, offset)
+                glVertex3f(-sz, sz, offset)
+            elif base == "XZ":
+                glVertex3f(-sz, offset, -sz)
+                glVertex3f(sz, offset, -sz)
+                glVertex3f(sz, offset, sz)
+                glVertex3f(-sz, offset, sz)
+            elif base == "YZ":
+                glVertex3f(offset, -sz, -sz)
+                glVertex3f(offset, sz, -sz)
+                glVertex3f(offset, sz, sz)
+                glVertex3f(offset, -sz, sz)
+            glEnd()
+
+            # Boundary line loop
+            glLineWidth(2.4 if is_hov else 1.2)
+            glColor4f(1.0, 0.78, 0.20, 0.95 if is_hov else 0.65)
+            glBegin(GL_LINE_LOOP)
+            if base == "XY":
+                glVertex3f(-sz, -sz, offset)
+                glVertex3f(sz, -sz, offset)
+                glVertex3f(sz, sz, offset)
+                glVertex3f(-sz, sz, offset)
+            elif base == "XZ":
+                glVertex3f(-sz, offset, -sz)
+                glVertex3f(sz, offset, -sz)
+                glVertex3f(sz, offset, sz)
+                glVertex3f(-sz, offset, sz)
+            elif base == "YZ":
+                glVertex3f(offset, -sz, -sz)
+                glVertex3f(offset, sz, -sz)
+                glVertex3f(offset, sz, sz)
+                glVertex3f(offset, -sz, sz)
+            glEnd()
+
+        glEnable(GL_LIGHTING)
+
     def _render_solid(self):
         tess = self.tessellation
         if not tess:
@@ -462,27 +544,37 @@ class Viewport3D(QOpenGLWidget):
 
         # 2. Sketch Curves (Lines & Arcs)
         is_constrained = sketch.last_result and sketch.last_result.dof == 0
-        if is_constrained:
-            glColor3f(0.15, 0.85, 0.35)  # Solved green
-        else:
-            glColor3f(0.0, 0.70, 0.95)   # Underconstrained cyan
+        normal_color = (0.15, 0.85, 0.35) if is_constrained else (0.0, 0.70, 0.95)
 
-        glLineWidth(2.2)
-        glBegin(GL_LINES)
         for line in sketch.lines.values():
             p1 = sketch.points.get(line.p1_id)
             p2 = sketch.points.get(line.p2_id)
             if p1 and p2:
                 pt1 = sketch.map_to_3d(p1.u, p1.v)
                 pt2 = sketch.map_to_3d(p2.u, p2.v)
+                is_sel = line.line_id in self.selected_sketch_lines
+                if is_sel:
+                    glLineWidth(4.0)
+                    glColor3f(0.0, 1.0, 1.0)  # Fusion glowing cyan selection
+                else:
+                    glLineWidth(2.2)
+                    glColor3f(*normal_color)
+                glBegin(GL_LINES)
                 glVertex3f(pt1.X(), pt1.Y(), pt1.Z())
                 glVertex3f(pt2.X(), pt2.Y(), pt2.Z())
-        glEnd()
+                glEnd()
 
         # Circles
         for circ in sketch.circles.values():
             cp = sketch.points.get(circ.center_id)
             if cp:
+                is_sel = circ.circle_id in self.selected_sketch_circles
+                if is_sel:
+                    glLineWidth(3.8)
+                    glColor3f(0.0, 1.0, 1.0)
+                else:
+                    glLineWidth(2.0)
+                    glColor3f(*normal_color)
                 glBegin(GL_LINE_LOOP)
                 for i in range(48):
                     ang = 2.0 * math.pi * (i / 48.0)
@@ -492,14 +584,40 @@ class Viewport3D(QOpenGLWidget):
                     glVertex3f(p3d.X(), p3d.Y(), p3d.Z())
                 glEnd()
 
+        # Arcs
+        if hasattr(sketch, "arcs"):
+            for arc in sketch.arcs.values():
+                cp = sketch.points.get(arc.center_id)
+                if cp:
+                    glLineWidth(2.2)
+                    glColor3f(*normal_color)
+                    glBegin(GL_LINE_STRIP)
+                    steps = 32
+                    a1 = arc.start_angle
+                    a2 = arc.end_angle
+                    if a2 < a1:
+                        a2 += 2.0 * math.pi
+                    for i in range(steps + 1):
+                        cur_a = a1 + (a2 - a1) * (i / float(steps))
+                        u = cp.u + arc.radius * math.cos(cur_a)
+                        v = cp.v + arc.radius * math.sin(cur_a)
+                        p3d = sketch.map_to_3d(u, v)
+                        glVertex3f(p3d.X(), p3d.Y(), p3d.Z())
+                    glEnd()
+
         # 3. Sketch Points
-        glPointSize(6.0)
-        glColor3f(1.0, 0.75, 0.2)
-        glBegin(GL_POINTS)
         for pt in sketch.points.values():
             p = sketch.map_to_3d(pt.u, pt.v)
+            is_sel = pt.point_id in self.selected_sketch_points
+            if is_sel:
+                glPointSize(10.0)
+                glColor3f(0.0, 1.0, 1.0)  # Selected cyan
+            else:
+                glPointSize(6.0)
+                glColor3f(1.0, 0.75, 0.2)
+            glBegin(GL_POINTS)
             glVertex3f(p.X(), p.Y(), p.Z())
-        glEnd()
+            glEnd()
 
         # 4. Rubber-band preview during active drawing
         if self._sketch_start_pt and self._sketch_current_pt:
@@ -699,8 +817,9 @@ class Viewport3D(QOpenGLWidget):
             return (0.0, 0.0)
 
         pl = self.active_sketch.plane
-        p0 = np.array([0.0, 0.0, 0.0], dtype=np.float32)
+        offset = float(getattr(self.active_sketch, "offset", 0.0))
         n = np.array(self.active_sketch.get_plane_normal(), dtype=np.float32)
+        p0 = n * offset
 
         hit = self._intersect_ray_with_plane(p_near, ray_dir, p0, n)
         if hit is None:
@@ -715,9 +834,29 @@ class Viewport3D(QOpenGLWidget):
         return (float(hit[0]), float(hit[1]))
 
     def _test_hover_origin_planes(self, sx: int, sy: int) -> Optional[str]:
-        """Detects if ray from mouse hits one of the 3 origin plane selection tiles."""
+        """Detects if ray from mouse hits one of the 3 origin plane selection tiles or a construction plane."""
         p_near, ray_dir = self._unproject_screen_to_ray(sx, sy)
         sz = 35.0
+
+        # Construction planes
+        if self.current_doc and hasattr(self.current_doc, "construction_planes"):
+            for pid, cp in self.current_doc.construction_planes.items():
+                if not cp.get("is_visible", True):
+                    continue
+                base = cp.get("base_plane", "XY")
+                off = float(cp.get("offset", 0.0))
+                if base == "XY":
+                    hit = self._intersect_ray_with_plane(p_near, ray_dir, np.array([0, 0, off], dtype=np.float32), np.array([0, 0, 1], dtype=np.float32))
+                    if hit is not None and -sz <= hit[0] <= sz and -sz <= hit[1] <= sz:
+                        return pid
+                elif base == "XZ":
+                    hit = self._intersect_ray_with_plane(p_near, ray_dir, np.array([0, off, 0], dtype=np.float32), np.array([0, 1, 0], dtype=np.float32))
+                    if hit is not None and -sz <= hit[0] <= sz and -sz <= hit[2] <= sz:
+                        return pid
+                elif base == "YZ":
+                    hit = self._intersect_ray_with_plane(p_near, ray_dir, np.array([off, 0, 0], dtype=np.float32), np.array([1, 0, 0], dtype=np.float32))
+                    if hit is not None and -sz <= hit[1] <= sz and -sz <= hit[2] <= sz:
+                        return pid
 
         # XY Plane (z = 0)
         hit_xy = self._intersect_ray_with_plane(p_near, ray_dir, np.array([0,0,0], dtype=np.float32), np.array([0,0,1], dtype=np.float32))
@@ -763,6 +902,41 @@ class Viewport3D(QOpenGLWidget):
 
         return (u, v, "none")
 
+    def _hit_test_sketch(self, u: float, v: float, thresh: float = 4.0) -> Tuple[Optional[str], Optional[str]]:
+        """Hit-tests points, lines, and circles in active sketch near (u, v)."""
+        if not self.active_sketch:
+            return None, None
+
+        # 1. Test Points
+        for pid, pt in self.active_sketch.points.items():
+            if math.hypot(pt.u - u, pt.v - v) <= thresh:
+                return "point", pid
+
+        # 2. Test Lines (perpendicular distance to line segment)
+        for lid, line in self.active_sketch.lines.items():
+            p1 = self.active_sketch.points.get(line.p1_id)
+            p2 = self.active_sketch.points.get(line.p2_id)
+            if p1 and p2:
+                du = p2.u - p1.u
+                dv = p2.v - p1.v
+                l2 = du * du + dv * dv
+                if l2 > 1e-9:
+                    t = max(0.0, min(1.0, ((u - p1.u) * du + (v - p1.v) * dv) / l2))
+                    proj_u = p1.u + t * du
+                    proj_v = p1.v + t * dv
+                    if math.hypot(u - proj_u, v - proj_v) <= thresh:
+                        return "line", lid
+
+        # 3. Test Circles (distance to circumference)
+        for cid, circ in self.active_sketch.circles.items():
+            cp = self.active_sketch.points.get(circ.center_id)
+            if cp:
+                dist_to_center = math.hypot(u - cp.u, v - cp.v)
+                if abs(dist_to_center - circ.radius) <= thresh:
+                    return "circle", cid
+
+        return None, None
+
     # --- Mouse & Keyboard Interactions ---
 
     def mousePressEvent(self, event: QMouseEvent):
@@ -775,6 +949,7 @@ class Viewport3D(QOpenGLWidget):
             if finish_rect.contains(pos):
                 self.set_sketch(None)
                 self.set_standard_view("home")
+                self.command_requested.emit("finish_sketch")
                 return
 
         # Plane Selection Mode Click
@@ -788,6 +963,7 @@ class Viewport3D(QOpenGLWidget):
                 return
 
         is_shift = bool(event.modifiers() & Qt.ShiftModifier)
+        is_ctrl = bool(event.modifiers() & Qt.ControlModifier)
 
         # Middle Mouse = Navigation
         if event.button() == Qt.MiddleButton:
@@ -799,16 +975,103 @@ class Viewport3D(QOpenGLWidget):
             if self._temp_tool_override:
                 self._active_nav_mode = self._temp_tool_override
                 return
-            if is_shift:
+            if is_shift and not self.is_sketch_mode:
                 self._active_nav_mode = "orbit"
                 return
 
             if self.is_sketch_mode and self.active_sketch:
                 raw_u, raw_v = self._get_sketch_plane_coords(pos.x(), pos.y())
                 u, v, snap = self._calculate_snap(raw_u, raw_v)
+                hit_thresh = max(self.camera_dist * 0.025, 2.5)
 
                 if self.active_sketch_tool == "select":
-                    # Selection
+                    kind, entity_id = self._hit_test_sketch(raw_u, raw_v, hit_thresh)
+                    if not (is_shift or is_ctrl):
+                        self.selected_sketch_points.clear()
+                        self.selected_sketch_lines.clear()
+                        self.selected_sketch_circles.clear()
+
+                    if kind == "point":
+                        if entity_id in self.selected_sketch_points:
+                            self.selected_sketch_points.remove(entity_id)
+                        else:
+                            self.selected_sketch_points.add(entity_id)
+                    elif kind == "line":
+                        if entity_id in self.selected_sketch_lines:
+                            self.selected_sketch_lines.remove(entity_id)
+                        else:
+                            self.selected_sketch_lines.add(entity_id)
+                    elif kind == "circle":
+                        if entity_id in self.selected_sketch_circles:
+                            self.selected_sketch_circles.remove(entity_id)
+                        else:
+                            self.selected_sketch_circles.add(entity_id)
+
+                    self.sketch_selection_changed.emit()
+                    self.update()
+                    return
+
+                elif self.active_sketch_tool == "dimension":
+                    kind, entity_id = self._hit_test_sketch(raw_u, raw_v, hit_thresh)
+                    if kind == "line":
+                        line = self.active_sketch.lines[entity_id]
+                        p1 = self.active_sketch.points[line.p1_id]
+                        p2 = self.active_sketch.points[line.p2_id]
+                        cur_len = math.hypot(p2.u - p1.u, p2.v - p1.v)
+                        val, ok = QInputDialog.getDouble(self, "Sketch Dimension", "Distance (mm):", cur_len, 0.01, 10000.0, 2)
+                        if ok:
+                            self.active_sketch.add_constraint("distance", [entity_id], value=val)
+                            self.active_sketch.solve()
+                            self.sketch_modified.emit()
+                            self.update()
+                        return
+                    elif kind == "circle":
+                        circ = self.active_sketch.circles[entity_id]
+                        cur_dia = circ.radius * 2.0
+                        val, ok = QInputDialog.getDouble(self, "Circle Dimension", "Diameter (mm):", cur_dia, 0.01, 10000.0, 2)
+                        if ok:
+                            circ.radius = val / 2.0
+                            self.active_sketch.solve()
+                            self.sketch_modified.emit()
+                            self.update()
+                        return
+                    elif kind == "point":
+                        if self.selected_sketch_points and entity_id not in self.selected_sketch_points:
+                            prev_pid = next(iter(self.selected_sketch_points))
+                            p1 = self.active_sketch.points[prev_pid]
+                            p2 = self.active_sketch.points[entity_id]
+                            cur_d = math.hypot(p2.u - p1.u, p2.v - p1.v)
+                            val, ok = QInputDialog.getDouble(self, "Distance Dimension", "Distance (mm):", cur_d, 0.01, 10000.0, 2)
+                            if ok:
+                                self.active_sketch.add_constraint("distance", [prev_pid, entity_id], value=val)
+                                self.active_sketch.solve()
+                                self.sketch_modified.emit()
+                                self.selected_sketch_points.clear()
+                                self.update()
+                            return
+                        else:
+                            self.selected_sketch_points.add(entity_id)
+                            self.update()
+                            return
+
+                elif self.active_sketch_tool in ("point", "sketch_point"):
+                    self.active_sketch.add_point(u, v)
+                    self.active_sketch.solve()
+                    self.sketch_modified.emit()
+                    self.update()
+                    return
+
+                elif self.active_sketch_tool in ("arc", "sketch_arc"):
+                    self._arc_pts.append((u, v))
+                    if len(self._arc_pts) >= 3:
+                        (u1, v1), (u2, v2), (u3, v3) = self._arc_pts[:3]
+                        p1_id = self.active_sketch.add_point(u1, v1)
+                        p2_id = self.active_sketch.add_point(u2, v2)
+                        p3_id = self.active_sketch.add_point(u3, v3)
+                        self.active_sketch.add_arc(p1_id, p2_id, p3_id)
+                        self.active_sketch.solve()
+                        self.sketch_modified.emit()
+                        self._arc_pts.clear()
                     self.update()
                     return
 
@@ -945,6 +1208,7 @@ class Viewport3D(QOpenGLWidget):
 
     def update_model(self, doc: CADDocument):
         """Tessellates current solid and re-renders viewport."""
+        self.current_doc = doc
         if doc.current_solid is not None and not doc.current_solid.IsNull():
             self.tessellation = OCCTessellator.tessellate(doc.current_solid)
         else:
@@ -1025,6 +1289,10 @@ class Viewport3D(QOpenGLWidget):
         self._sketch_start_pt = None
         self._sketch_current_pt = None
         self._snap_pt = None
+        self.selected_sketch_points.clear()
+        self.selected_sketch_lines.clear()
+        self.selected_sketch_circles.clear()
+        self._arc_pts.clear()
 
         if self.is_sketch_mode and sketch:
             target_az = 0.0
@@ -1208,7 +1476,7 @@ class Viewport3D(QOpenGLWidget):
             menu.addSeparator()
 
             act_inspect = menu.addAction("Measure / Inspect [I]")
-            act_inspect.triggered.connect(lambda: self.command_requested.emit("inspect"))
+            act_inspect.triggered.connect(lambda: self.command_requested.emit("measure"))
 
             act_param = menu.addAction("Change Parameters")
             act_param.triggered.connect(lambda: self.command_requested.emit("parameters"))

@@ -172,7 +172,123 @@ class TestFusion360Parity(unittest.TestCase):
 
         window.close()
 
+    def test_primitives_sphere_torus_cone(self):
+        """Verifies sphere, torus, and cone parametric features recompute correctly."""
+        doc = CADDocument("TestPrimitives")
+        # 1. Sphere
+        doc.history.add_feature("sphere", {"radius": 15.0})
+        ok, err = doc.recompute()
+        self.assertTrue(ok, f"Sphere recompute failed: {err}")
+        dx, dy, dz = SolidOperations.get_bounding_dimensions(doc.current_solid)
+        self.assertAlmostEqual(dx, 30.0, places=1)
+
+        # 2. Torus
+        doc.history.features.clear()
+        doc.history.add_feature("torus", {"r_major": 25.0, "r_minor": 5.0})
+        ok, err = doc.recompute()
+        self.assertTrue(ok, f"Torus recompute failed: {err}")
+        dx, dy, dz = SolidOperations.get_bounding_dimensions(doc.current_solid)
+        self.assertGreaterEqual(dx, 58.0)
+        self.assertLessEqual(dx, 66.0)
+
+        # 3. Cone
+        doc.history.features.clear()
+        doc.history.add_feature("cone", {"r1": 20.0, "r2": 5.0, "height": 30.0})
+        ok, err = doc.recompute()
+        self.assertTrue(ok, f"Cone recompute failed: {err}")
+        dx, dy, dz = SolidOperations.get_bounding_dimensions(doc.current_solid)
+        self.assertAlmostEqual(dz, 30.0, places=1)
+
+    def test_construction_plane_and_offset_sketch(self):
+        """Verifies construction datum plane creation and sketch coordinate offset mapping."""
+        doc = CADDocument("TestConstruction")
+        pid = doc.add_construction_plane("offset", base_plane="XY", offset=50.0)
+        self.assertEqual(doc.construction_planes[pid]["offset"], 50.0)
+        self.assertIn(pid, doc.construction_planes)
+
+        # Create sketch on construction plane
+        sk = doc.create_sketch(plane="XY", offset=50.0)
+        self.assertEqual(sk.offset, 50.0)
+        p = sk.map_to_3d(10.0, 20.0)
+        self.assertAlmostEqual(p.X(), 10.0, places=3)
+        self.assertAlmostEqual(p.Y(), 20.0, places=3)
+        self.assertAlmostEqual(p.Z(), 50.0, places=3)
+
+    def test_transform_shape_move(self):
+        """Verifies Move / Copy transformation of a solid body."""
+        box = SolidOperations.make_box(20.0, 20.0, 20.0)
+        moved = SolidOperations.transform_shape(box, dx=10.0, dy=20.0, dz=30.0, rz=90.0)
+        self.assertIsNotNone(moved)
+        xmin, ymin, zmin, xmax, ymax, zmax = SolidOperations.get_bounding_box(moved)
+        self.assertAlmostEqual(zmin, 30.0, places=2)
+        self.assertAlmostEqual(zmax, 50.0, places=2)
+
+    def test_sketch_hit_testing_and_selection(self):
+        """Verifies viewport sketch entity hit-testing and selection toggling."""
+        window = MainWindow()
+        vp = window.viewport
+        sk = window.doc.create_sketch(plane="XY")
+        p1 = sk.add_point(0.0, 0.0)
+        p2 = sk.add_point(40.0, 0.0)
+        l1 = sk.add_line(p1, p2)
+        c1 = sk.add_circle(20.0, 20.0, 10.0)
+        sk.solve()
+        vp.set_sketch(sk)
+
+        # Hit-test point
+        kind, eid = vp._hit_test_sketch(0.0, 0.5, thresh=2.0)
+        self.assertEqual(kind, "point")
+        self.assertEqual(eid, p1)
+
+        # Hit-test line segment
+        kind, eid = vp._hit_test_sketch(20.0, 0.5, thresh=2.0)
+        self.assertEqual(kind, "line")
+        self.assertEqual(eid, l1)
+
+        # Hit-test circle circumference
+        kind, eid = vp._hit_test_sketch(20.0, 30.0, thresh=2.0)
+        self.assertEqual(kind, "circle")
+        self.assertEqual(eid, c1)
+
+        # Selection state
+        vp.selected_sketch_lines.add(l1)
+        self.assertIn(l1, vp.selected_sketch_lines)
+        window.close()
+
+    def test_sketch_constraints_dispatch(self):
+        """Verifies constraints (horizontal, vertical, parallel, perpendicular) solve on selected entities."""
+        window = MainWindow()
+        window._create_new_sketch("XY")
+        sk = window.doc.get_sketch(window.active_sketch_id)
+
+        # Add 2 lines
+        p1 = sk.add_point(0.0, 0.0)
+        p2 = sk.add_point(50.0, 5.0)
+        l1 = sk.add_line(p1, p2)
+
+        p3 = sk.add_point(0.0, 20.0)
+        p4 = sk.add_point(50.0, 22.0)
+        l2 = sk.add_line(p3, p4)
+
+        # Select line 1 and apply horizontal constraint
+        window.viewport.selected_sketch_lines = {l1}
+        window._handle_sketch_constraint("constrain_horizontal")
+        sk = window.doc.get_sketch(window.active_sketch_id)
+        pt1 = sk.points[p1]
+        pt2 = sk.points[p2]
+        self.assertAlmostEqual(pt1.v, pt2.v, places=2)
+
+        # Select both lines and apply parallel constraint
+        window.viewport.selected_sketch_lines = {l1, l2}
+        window._handle_sketch_constraint("constrain_parallel")
+        pt3 = sk.points[p3]
+        pt4 = sk.points[p4]
+        self.assertAlmostEqual(pt3.v, pt4.v, places=2)
+
+        window.close()
+
 
 if __name__ == "__main__":
     unittest.main()
+
 
