@@ -25,6 +25,11 @@ def main():
     app.setApplicationDisplayName("MechCAD")
     app.setOrganizationName("MechCAD")
 
+    from PySide6.QtGui import QIcon
+    icon_path = os.path.join(PROJECT_ROOT, "assets", "branding", "mechcad.ico")
+    if os.path.exists(icon_path):
+        app.setWindowIcon(QIcon(icon_path))
+
     # Load Windows standard engineering fonts
     from PySide6.QtGui import QFontDatabase, QFont
     for font_file in ["segoeui.ttf", "segoeuib.ttf", "seguiemj.ttf", "arial.ttf"]:

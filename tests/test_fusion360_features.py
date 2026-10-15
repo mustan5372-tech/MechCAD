@@ -161,9 +161,9 @@ class TestFusion360Parity(unittest.TestCase):
         vp.animate_to_orientation(90.0, 45.0, target_dist=200.0, duration_ms=100)
         self.assertTrue(vp._camera_anim_timer.isActive())
         # Step animation to completion
-        vp._camera_anim_elapsed.restart()
-        # Force elapsed time past duration
-        vp._camera_anim_duration = 1
+        import time
+        time.sleep(0.05)
+        vp._camera_anim_duration = 20
         vp._on_camera_anim_step()
         self.assertAlmostEqual(vp.azimuth, 90.0, places=1)
         self.assertAlmostEqual(vp.elevation, 45.0, places=1)

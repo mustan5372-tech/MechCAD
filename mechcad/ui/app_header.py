@@ -102,6 +102,8 @@ class AppHeader(QWidget):
         act_stl.triggered.connect(lambda: self.file_action_triggered.emit("export_stl"))
         act_dxf = self.file_menu.addAction("Export 2D DXF Drawing (.dxf)...")
         act_dxf.triggered.connect(lambda: self.file_action_triggered.emit("export_dxf"))
+        act_about = self.file_menu.addAction("About MechCAD...")
+        act_about.triggered.connect(lambda: self.file_action_triggered.emit("about"))
         self.file_menu.addSeparator()
 
         act_exit = self.file_menu.addAction("Exit MechCAD")

@@ -12,7 +12,7 @@ from PySide6.QtWidgets import (
     QMessageBox, QSplitter
 )
 from PySide6.QtCore import Qt
-from PySide6.QtGui import QKeyEvent
+from PySide6.QtGui import QKeyEvent, QIcon, QPixmap
 
 from mechcad.ui.theme import ThemeColors, FUSION_QSS
 from mechcad.ui.app_header import AppHeader
@@ -41,6 +41,12 @@ class MainWindow(QMainWindow):
         self.setWindowTitle("MechCAD - Professional 3D Parametric CAD")
         self.resize(1360, 850)
         self.setStyleSheet(FUSION_QSS)
+
+        # Set Window Branding Icon
+        proj_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+        icon_path = os.path.join(proj_root, "assets", "branding", "mechcad.ico")
+        if os.path.exists(icon_path):
+            self.setWindowIcon(QIcon(icon_path))
 
         # Active Document & Modeling State
         self.doc = CADDocument("Untitled 1")
@@ -249,8 +255,87 @@ class MainWindow(QMainWindow):
                     QMessageBox.information(self, "Export Complete", f"Successfully exported 2D drawing to DXF:\n{path}")
                 except Exception as e:
                     QMessageBox.critical(self, "Export Error", f"DXF export failed:\n{e}")
+        elif action == "about":
+            self._show_about_dialog()
         elif action == "exit":
             self.close()
+
+    def _show_about_dialog(self):
+        """Displays About MechCAD dialog with branding logo and technical specs."""
+        from PySide6.QtWidgets import QDialog, QLabel, QPushButton
+        dlg = QDialog(self)
+        dlg.setWindowTitle("About MechCAD")
+        dlg.setFixedSize(480, 500)
+        dlg.setStyleSheet(f"""
+            QDialog {{
+                background-color: {ThemeColors.PANEL_BG};
+                color: {ThemeColors.TEXT_MAIN};
+            }}
+            QLabel {{
+                color: {ThemeColors.TEXT_MAIN};
+                font-family: 'Segoe UI', sans-serif;
+            }}
+            QPushButton {{
+                background-color: {ThemeColors.ACCENT_BLUE};
+                color: #FFFFFF;
+                border: none;
+                border-radius: 3px;
+                padding: 6px 20px;
+                font-weight: 600;
+            }}
+            QPushButton:hover {{
+                background-color: {ThemeColors.HOVER_BLUE};
+            }}
+        """)
+        layout = QVBoxLayout(dlg)
+        layout.setContentsMargins(24, 24, 24, 20)
+        layout.setSpacing(12)
+
+        proj_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+        logo_path = os.path.join(proj_root, "assets", "branding", "mechcad-emblem.png")
+        if os.path.exists(logo_path):
+            lbl_logo = QLabel()
+            pix = QPixmap(logo_path).scaled(130, 130, Qt.KeepAspectRatio, Qt.SmoothTransformation)
+            lbl_logo.setPixmap(pix)
+            lbl_logo.setAlignment(Qt.AlignCenter)
+            layout.addWidget(lbl_logo)
+
+        lbl_title = QLabel("MechCAD")
+        lbl_title.setStyleSheet("font-size: 20px; font-weight: 700; color: #FFFFFF;")
+        lbl_title.setAlignment(Qt.AlignCenter)
+        layout.addWidget(lbl_title)
+
+        lbl_sub = QLabel("Professional 3D Mechanical CAD & Parametric Modeling")
+        lbl_sub.setStyleSheet(f"font-size: 11px; color: {ThemeColors.TEXT_MUTED};")
+        lbl_sub.setAlignment(Qt.AlignCenter)
+        layout.addWidget(lbl_sub)
+
+        info_text = (
+            "<b>Version:</b> 1.0.0 (x64 Production Desktop)<br>"
+            "<b>Geometry Kernel:</b> Open CASCADE Technology 7.8 (B-Rep Engine)<br>"
+            "<b>2D Constraint Solver:</b> SolveSpace 2D Geometric Solver<br>"
+            "<b>Graphics Pipeline:</b> Hardware Accelerated OpenGL 3D Viewport<br>"
+            "<b>UI Architecture:</b> PySide6 (Qt for Python 6.12)<br><br>"
+            "<b>Official Repository:</b> <a style='color: #0082c8;' href='https://github.com/mustan5372-tech/MechCAD'>github.com/mustan5372-tech/MechCAD</a><br>"
+            "Copyright © 2026 MechCAD Contributors. All rights reserved."
+        )
+        lbl_info = QLabel(info_text)
+        lbl_info.setOpenExternalLinks(True)
+        lbl_info.setStyleSheet("font-size: 11px; line-height: 140%;")
+        lbl_info.setAlignment(Qt.AlignCenter)
+        layout.addWidget(lbl_info)
+
+        layout.addStretch()
+
+        btn_box = QHBoxLayout()
+        btn_box.addStretch()
+        btn_close = QPushButton("Close")
+        btn_close.clicked.connect(dlg.accept)
+        btn_box.addWidget(btn_close)
+        btn_box.addStretch()
+        layout.addLayout(btn_box)
+
+        dlg.exec()
 
     def _handle_undo(self):
         if self.doc.undo():
