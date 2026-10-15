@@ -26,6 +26,29 @@ Unlike superficial mockups or mesh viewers, MechCAD is built on:
 
 ---
 
+## Download & Install
+
+### Latest Release
+Download the latest Windows x64 installer from the **[GitHub Releases](https://github.com/mustan5372-tech/MechCAD/releases/latest)** page:
+
+| Artifact | Description |
+|---|---|
+| `MechCAD-Setup-vX.Y.Z-x64.exe` | Windows x64 installer (Inno Setup) |
+| `SHA256SUMS.txt` | SHA-256 checksum for integrity verification |
+
+### Installation Steps
+1. Download **`MechCAD-Setup-vX.Y.Z-x64.exe`** from the latest release.
+2. Run the installer and follow the setup wizard.
+3. Launch MechCAD from the **Start Menu** or **Desktop** shortcut.
+
+### Verify Installer Integrity
+```powershell
+certutil -hashfile MechCAD-Setup-vX.Y.Z-x64.exe SHA256
+```
+Compare the output hash with the value in **SHA256SUMS.txt** from the same release.
+
+---
+
 ## Quick Start & Launching
 
 ### Option 1: Double-Click Launcher
@@ -132,6 +155,36 @@ Click **🎓 Automobile Learning Mode** in the top application header to open th
 4. **EV Traction Motor Stator Casing:** Radial cooling fins, rotor cavity, and mounting spigot.
 
 Click **Load Reference Model** on any exercise to immediately load the complete parametric CAD model with full feature history into the 3D workspace.
+
+---
+
+## Releasing a New Version (Developers)
+
+MechCAD uses **automated GitHub Actions releases**. To publish a new version:
+
+```powershell
+# 1. Ensure all changes are committed and pushed to main
+git add -A && git commit -m "feat: describe your changes" && git push origin main
+
+# 2. Tag the release with semantic versioning
+git tag -a v0.2.0 -m "MechCAD v0.2.0 — description of this release"
+git push origin v0.2.0
+```
+
+This triggers the [Release workflow](.github/workflows/release.yml) which:
+1. ✅ Installs dependencies from `requirements.txt`
+2. ✅ Runs the automated test suite
+3. ✅ Builds the standalone EXE via PyInstaller
+4. ✅ Packages the installer via Inno Setup 6
+5. ✅ Generates SHA-256 checksums
+6. ✅ Publishes the GitHub Release with all artifacts
+
+The release appears at [github.com/mustan5372-tech/MechCAD/releases](https://github.com/mustan5372-tech/MechCAD/releases).
+
+### Versioning Convention
+- `v0.Y.Z` — Development / pre-release versions
+- `v1.0.0` — First stable production release
+- Tags containing `alpha`, `beta`, or `rc` are automatically marked as pre-releases
 
 ---
 
